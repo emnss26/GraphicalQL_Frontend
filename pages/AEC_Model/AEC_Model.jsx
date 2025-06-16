@@ -6,6 +6,11 @@ const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 const AECModelPage = () => {
   const [cookies, setCookie] = useCookies(["access_token"]);
   const [hubs, setHubs] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [models, setModels] = useState([]);
+  const [topFolders, setTopFolders] = useState([]);
+  const [subFolders, setSubFolders] = useState([]);
+  const [folderFiles, setFolderFiles] = useState([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -17,7 +22,21 @@ const AECModelPage = () => {
         const result = await response.json();
 
         console.log("Fetched Hubs:", result.data.hubs);
+        console.log("Fetched Projects:", result.data.projects);
+        console.log("Fetched Models:", result.data.models);
+        console.log("Sheets", result.data.sheets);
+        console.log("Top Folders", result.data.topFolders);
+        console.log("SubFolders", result.data.subFolders);
+        console.log("Files", result.data.files);
+        console.log("Revisions", result.error);
+
         setHubs(result.data.hubs);
+        setProjects(result.data.projects);
+        setModels(result.data.models);
+        setTopFolders(result.data.topFolders);
+        setSubFolders(result.data.subFolders);
+        setFolderFiles(result.data.files);
+        setError("");
       } catch (err) {
         setError("Failed to fetch hubs.");
         console.error(err);
