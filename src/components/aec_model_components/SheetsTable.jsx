@@ -7,16 +7,28 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { useState } from "react";
+
+
+import { useState, useEffect } from "react";
 
 export default function SheetsTable({ data = [] }) {
-  const [rows, setRows] = useState(
+  const [rows, setRows] = useState(() =>
     data.map((sheet) => ({
       ...sheet,
       plannedIssueDate: sheet.plannedIssueDate || "",
       realIssueDate: sheet.realIssueDate || "",
     }))
   );
+
+  useEffect(() => {
+    setRows(
+      data.map((sheet) => ({
+        ...sheet,
+        plannedIssueDate: sheet.plannedIssueDate || "",
+        realIssueDate: sheet.realIssueDate || "",
+      }))
+    );
+  }, [data]);
 
   const handleChange = (idx, field, value) => {
     setRows((prev) => {
@@ -25,6 +37,7 @@ export default function SheetsTable({ data = [] }) {
       return updated;
     });
   };
+
 
   return (
     <Table className="table-auto border-collapse w-full">
