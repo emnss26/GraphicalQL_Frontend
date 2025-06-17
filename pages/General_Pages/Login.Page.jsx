@@ -1,13 +1,9 @@
 import React from "react";
-import { useCookies } from "react-cookie";
-import { useNavigate } from "react-router-dom";
 
 const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 const clientId = import.meta.env.VITE_CLIENT_ID;
 
 const LoginPage = () => {
-  const [cookies, setCookie] = useCookies(["token"]);
-  const navigate = useNavigate();
 
   const handleLogin = () => {
     const options = {
