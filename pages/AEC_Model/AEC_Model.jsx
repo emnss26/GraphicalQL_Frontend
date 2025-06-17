@@ -28,7 +28,8 @@ const AECModelPage = () => {
         console.log("Top Folders", result.data.topFolders);
         console.log("SubFolders", result.data.subFolders);
         console.log("Files", result.data.files);
-        console.log("Revisions", result.error);
+        console.log("Revisions", result.data.projectReviews);
+        console.log("Revision Status", result.data.revisionStatuses);
 
         setHubs(result.data.hubs);
         setProjects(result.data.projects);
