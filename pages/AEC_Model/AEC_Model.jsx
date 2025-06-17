@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { useCookies } from "react-cookie";
+import MainLayout from "@/components/general_component/MainLayout";
+import SheetsTable from "@/components/aec_model_components/SheetsTable";
 
 const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 
-const AECModelPage = () => {
-  const [cookies, setCookie] = useCookies(["access_token"]);
+export default function AECModelPage() {
+  const [cookies] = useCookies(["access_token"]);
   const [hubs, setHubs] = useState([]);
   const [projects, setProjects] = useState([]);
   const [models, setModels] = useState([]);
   const [topFolders, setTopFolders] = useState([]);
   const [subFolders, setSubFolders] = useState([]);
   const [folderFiles, setFolderFiles] = useState([]);
+  const [sheets, setSheets] = useState([]);
+  const [sheetRows, setSheetRows] = useState([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -28,16 +32,18 @@ const AECModelPage = () => {
         console.log("Top Folders", result.data.topFolders);
         console.log("SubFolders", result.data.subFolders);
         console.log("Files", result.data.files);
-        console.log("Revisions", result.error);
+        console.log("Revisions", result.data.projectReviews);
+        console.log("Revision Status", result.data.revisionStatuses);
 
         setHubs(result.data.hubs);
         setProjects(result.data.projects);
         setModels(result.data.models);
         setTopFolders(result.data.topFolders);
         setSubFolders(result.data.subFolders);
-        setFolderFiles(result.data.files);
-        setError("");
-      } catch (err) {
+      setFolderFiles(result.data.files);
+      setSheets(result.data.sheets || []);
+      setError("");
+    } catch (err) {
         setError("Failed to fetch hubs.");
         console.error(err);
       }
@@ -46,7 +52,47 @@ const AECModelPage = () => {
     fetchHubs();
   }, []);
 
-  // Check if the token exists
+  useEffect(() => {
+    if (!sheets.length) return;
+    const fileNames = folderFiles.map((f) =>
+      f.attributes?.displayName?.toLowerCase() || ""
+    );
+    const rows = sheets.map((sheet) => {
+      const props = sheet.properties?.results || [];
+      const name =
+        props.find((p) => p.name === "Sheet Name")?.value || sheet.name || "";
+      const number = props.find((p) => p.name === "Sheet Number")?.value || "";
+      const currentRevision = props.find(
+        (p) => p.name === "Current Revision"
+      )?.value;
+      const currentRevisionDesc = props.find(
+        (p) => p.name === "Current Revision Description"
+      )?.value;
+      const currentRevisionDate = props.find(
+        (p) => p.name === "Current Revision Date"
+      )?.value;
+
+      const inAcc = fileNames.some(
+        (fn) =>
+          fn.includes(number.toLowerCase()) && fn.includes(name.toLowerCase())
+      );
+
+      return {
+        name,
+        number,
+        currentRevision,
+        currentRevisionDesc,
+        currentRevisionDate,
+        inAcc,
+      };
+    });
+    setSheetRows(rows);
+  }, [sheets, folderFiles]);
+
+  useEffect(() => {
+    console.log({ projects, models, topFolders, subFolders, folderFiles, error });
+  }, [projects, models, topFolders, subFolders, folderFiles, error]);
+
   if (!cookies) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
@@ -68,16 +114,11 @@ const AECModelPage = () => {
   console.log("Hubs:", hubs);
 
   return (
-    <div className="aec-model-page">
-      <h1>AEC Model Page</h1>
-      {/* Add your AEC Model content here */}
-      <p>
-        Welcome to the AEC Model page. Here you can view and interact with the
-        AEC model.
-      </p>
-      {/* Example content */}
-    </div>
+    <MainLayout>
+      <div>
+        <h2 className="text-xl font-bold mb-4">Project Sheets</h2>
+        <SheetsTable data={sheetRows} />
+      </div>
+    </MainLayout>
   );
-};
-
-export default AECModelPage;
+}
