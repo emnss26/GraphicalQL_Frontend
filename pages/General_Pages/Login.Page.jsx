@@ -20,7 +20,7 @@ const LoginPage = () => {
 
   return (
     <GeneralLayout>
-      <div className="flex h-full bg-gray-100">
+      <div className="flex h-full bg-white">
         <div className="w-1/2" />
         <div className="w-1/2 flex flex-col justify-center items-end p-8 space-y-4">
           <h1 className="text-3xl font-bold text-right">Login to Autodesk</h1>
