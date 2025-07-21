@@ -11,6 +11,10 @@
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.2",
+<<<<<<< HEAD
+=======
+    "@radix-ui/react-dialog": "^1.1.14",
+>>>>>>> 0106298dc6c00046c1d5875dddc2a42f67a2eb6d
     "@radix-ui/react-popover": "^1.1.14",
     "@radix-ui/react-slot": "^1.2.3",
     "class-variance-authority": "^0.7.1",
