@@ -20,19 +20,7 @@ const LoginPage = () => {
 
   return (
     <GeneralLayout>
-<<<<<<< HEAD
-      <div className="flex flex-col items-center justify-center min-h-full bg-gray-100">
-        <h1 className="text-3xl font-bold mb-6">Login to Autodesk</h1>
-        <p className="mb-4 text-gray-600">
-          Please authenticate to access the AEC Model.
-        </p>
-        <button
-          className="btn-primary font-medium px-6 py-3 rounded-md shadow transition-colors"
-          onClick={handleLogin}
-        >
-          Authenticate
-        </button>
-=======
+
       <div className="flex h-full bg-white">
         <div className="w-1/2" />
         <div className="w-1/2 flex flex-col justify-center items-end p-8 space-y-4">
@@ -47,7 +35,7 @@ const LoginPage = () => {
             Authenticate
           </button>
         </div>
->>>>>>> 0106298dc6c00046c1d5875dddc2a42f67a2eb6d
+
       </div>
     </GeneralLayout>
   );

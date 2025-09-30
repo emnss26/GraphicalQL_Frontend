@@ -7,11 +7,7 @@ const HomePage = () => {
 
   return (
     <GeneralLayout>
-<<<<<<< HEAD
-      <div className="home-page">
-        <h1>Welcome to the Home Page</h1>
-        <button onClick={() => navigate("/login")}>Go to Login</button>
-=======
+
       <div className="flex flex-col items-center justify-center h-full min-h-screen bg-white">
         <img
           src="/Abitat_img.png"
@@ -28,7 +24,7 @@ const HomePage = () => {
         >
           Go to Login
         </button>
->>>>>>> 0106298dc6c00046c1d5875dddc2a42f67a2eb6d
+
       </div>
     </GeneralLayout>
   );
