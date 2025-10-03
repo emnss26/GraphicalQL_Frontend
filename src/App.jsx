@@ -1,10 +1,10 @@
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import { CookiesProvider } from "react-cookie";
 
-import HomePage from '../pages/General_Pages/Home.Page'
-import LoginPage from '../pages/General_Pages/Login.Page';
-import AECProjectsPage from '../pages/AEC_Model/AEC_Projects_Home';
-import AECModelPlansPage from '../pages/AEC_Model/AEC_Plans_Model'
+import HomePage from './pages/General_Pages/Home.Page'
+import LoginPage from './pages/General_Pages/Login.Page';
+import AECProjectsPage from './pages/AEC_Model/AEC_Projects_Home';
+import AECModelPlansPage from './pages/AEC_Model/AEC_Plans_Model'
 
 function App() {
   return (
