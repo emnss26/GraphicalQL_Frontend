@@ -17,7 +17,7 @@ export default function GeneralLayout({ children, noPadding = false }) {
     //let ignore = false;
     const loadUser = async () => {
       try {
-        const res = await fetch(`${backendUrl}/general/userprofile`, {
+        const res = await fetch(`${backendUrl}/auth/userprofile`, {
           credentials: "include",
         });
 
