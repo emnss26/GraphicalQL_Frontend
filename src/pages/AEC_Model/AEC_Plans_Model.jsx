@@ -149,14 +149,14 @@ export default function AECModelPlansPage() {
           credentials: "include",
         });
         const aj = await safeJson(a, `/aec/${pId}/graphql-folders/get-selection`);
-        setSelectedFolderId(aj.folderId || null);
+        setSelectedFolderId(aj.data?.folderId || null);
       } catch {}
       try {
         const b = await fetch(`${apiBase}/aec/${pId}/graphql-models/get-selection`, {
           credentials: "include",
         });
         const bj = await safeJson(b, `/aec/${pId}/graphql-models/get-selection`);
-        setSelectedModelsIds(bj.modelIds || []);
+        setSelectedModelsIds(bj.data?.modelIds || []);
       } catch {}
     })();
   }, [apiBase, pId]);
@@ -173,6 +173,8 @@ export default function AECModelPlansPage() {
       } catch {}
     })();
   }, [apiBase, pId]);
+
+  console.log("Models loaded:", models);
 
   // folder tree al abrir
   useEffect(() => {
@@ -195,23 +197,23 @@ export default function AECModelPlansPage() {
 
   // cargar planes desde DB
   const loadPlans = async () => {
-    try {
-      const url = `${apiBase}/plans/${pId}/plans`;
-      const res = await fetch(url, { credentials: "include" });
-      const json = await safeJson(res, url);
-      const loaded = json.plans || json.data || [];
-      if (loaded.length === 0) {
-        setPlans(Array.from({ length: 10 }, () => emptyPlan()));
-      } else {
-        setPlans(loaded);
-      }
-      setError("");
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "Error al cargar planes.");
+  try {
+    const url = `${apiBase}/plans/${pId}/plans`;
+    const res = await fetch(url, { credentials: "include" });
+    const json = await safeJson(res, url);
+    const loaded = json.data?.plans ?? [];
+    if (loaded.length === 0) {
       setPlans(Array.from({ length: 10 }, () => emptyPlan()));
+    } else {
+      setPlans(loaded);
     }
-  };
+    setError("");
+  } catch (err) {
+    console.error(err);
+    setError(err.message || "Error al cargar planes.");
+    setPlans(Array.from({ length: 10 }, () => emptyPlan()));
+  }
+};
   useEffect(() => {
     loadPlans();
   }, [apiBase, pId]);
@@ -405,7 +407,7 @@ export default function AECModelPlansPage() {
     }
   };
 
-  const hasPersistedRows = plans.some((p) => p.id);
+  const hasPersistedRows = Array.isArray(plans) && plans.some((p) => p.id);
 
   return (
     <MainLayout>

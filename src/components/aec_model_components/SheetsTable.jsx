@@ -55,8 +55,10 @@ export default function SheetsTable({
     status: sheet.status ?? "",
   });
 
-  const [rows, setRows] = useState(() => data.map(normalizeRow));
-  useEffect(() => { setRows(data.map(normalizeRow)); }, [data]);
+  const [rows, setRows] = useState(() => Array.isArray(data) ? data.map(normalizeRow) : []);
+useEffect(() => {
+  setRows(Array.isArray(data) ? data.map(normalizeRow) : []);
+}, [data]);
 
   const handleChange = (idx, field, valueUI) => {
     setRows((prev) => {

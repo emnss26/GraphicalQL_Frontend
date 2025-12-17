@@ -53,7 +53,7 @@ export default function MainLayout({ children }) {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => navigate("/aec/projects")}
+            onClick={() => navigate("/aec-projects")}
             className="hidden sm:inline-flex items-center rounded-md border border-neutral-300 bg-neutral-100 text-[rgb(170,32,47)] px-3 py-1.5 text-xs font-medium shadow-sm transition-colors duration-500 hover:bg-[rgb(170,32,47)] hover:text-white"
           >
             Go Projects
