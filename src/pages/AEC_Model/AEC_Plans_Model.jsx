@@ -4,10 +4,11 @@ import { useParams } from "react-router-dom";
 import { read, utils, writeFile } from "xlsx";
 
 import { Button } from "@/components/ui/button";
-import MainLayout from "@/components/general_component/MainLayout";
+import AppLayout from "@/components/general_component/AppLayout";
 import SheetsTable from "@/components/aec_model_components/SheetsTable";
 import SelectModelsModal from "../../components/aec_model_components/SelectModelModal";
 import SelectFolderModal from "../../components/aec_model_components/SelectFolderModal";
+
 
 const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 
@@ -31,6 +32,7 @@ export default function AECModelPlansPage() {
   const [cookies] = useCookies(["access_token"]);
   const { projectId } = useParams();
   const altProjectId = sessionStorage.getItem("altProjectId");
+  const projectName = sessionStorage.getItem("projectName");
 
   const [models, setModels] = useState([]);
   const [selectedModelsIds, setSelectedModelsIds] = useState([]);
@@ -174,7 +176,6 @@ export default function AECModelPlansPage() {
     })();
   }, [apiBase, pId]);
 
-  console.log("Models loaded:", models);
 
   // folder tree al abrir
   useEffect(() => {
@@ -274,6 +275,8 @@ export default function AECModelPlansPage() {
           return { name, number, plannedGenDate, plannedReviewDate, plannedIssueDate };
         })
         .filter((p) => p.name || p.number);
+
+      console.log("Parsed plans from Excel:", plansPayload);
 
       if (!plansPayload.length) throw new Error("No se encontraron datos de planos.");
 
@@ -397,7 +400,10 @@ export default function AECModelPlansPage() {
         },
         body: JSON.stringify({}),
       });
+     
+
       const json = await safeJson(res, url);
+      console.log("Sync response:", json);
       if (!res.ok) throw new Error(json?.error || "Error al sincronizar.");
       await loadPlans();
       alert("Sincronización con AEC/ACC completada.");
@@ -409,10 +415,19 @@ export default function AECModelPlansPage() {
 
   const hasPersistedRows = Array.isArray(plans) && plans.some((p) => p.id);
 
+  console.log("Models IDs selected:", selectedModelsIds);
+  console.log("Folder ID selected:", selectedFolderId);
+  console.log("Plans loaded:", plans);
+
   return (
-    <MainLayout>
+    <AppLayout>
       <div className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight">Project Sheets</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-semibold tracking-tight justify-left">Project Sheets</h2>
+          {projectName && (
+            <span className="text-sm text-neutral-600 ">Proyecto: {projectName}</span>
+          )}
+        </div>
 
         <div className="flex flex-wrap gap-2">
           <Button className="bg-[rgb(170,32,47)] hover:bg-[rgb(150,28,42)] text-white h-10 px-4" onClick={() => setModalOpen(true)}>
@@ -496,6 +511,6 @@ export default function AECModelPlansPage() {
           selectedFolderId={selectedFolderId}
         />
       </div>
-    </MainLayout>
+    </AppLayout>
   );
 }

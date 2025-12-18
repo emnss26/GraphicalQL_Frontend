@@ -1,12 +1,12 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import GeneralLayout from "@/components/general_component/GeneralLayout";
+import AppLayout from "@/components/general_component/AppLayout";
 
 const HomePage = () => {
   const navigate = useNavigate();
 
   return (
-    <GeneralLayout>
+    <AppLayout noPadding={true}>
       <div className="flex min-h-screen flex-col items-center justify-center bg-white">
         {/* Logo */}
         <img
@@ -42,7 +42,7 @@ const HomePage = () => {
           </button>
         </div>
       </div>
-    </GeneralLayout>
+    </AppLayout>
   );
 };
 

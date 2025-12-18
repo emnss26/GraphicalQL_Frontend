@@ -2,10 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useCookies } from "react-cookie";
 import { useNavigate } from "react-router-dom";
 
-import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
-import MainLayout from "@/components/general_component/MainLayout";
-import GeneralLayout from "@/components/general_component/GeneralLayout";
+import AppLayout from "@/components/general_component/AppLayout";
 
 const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 
@@ -57,7 +54,7 @@ export default function AECProjectsPage() {
   }
 
    return (
-     <GeneralLayout>
+     <AppLayout>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center min-h-[70vh]">
         {/* Izquierda: Logo */}
         <div className="flex items-center justify-center">
@@ -95,6 +92,8 @@ export default function AECProjectsPage() {
                           p.alternativeIdentifiers
                             ?.dataManagementAPIProjectId
                         );
+                        sessionStorage.setItem("projectName", p.name); 
+                        
                         navigate(`/plans/${p.id}`);
                       }}
                     >
@@ -111,6 +110,6 @@ export default function AECProjectsPage() {
           </div>
         </div>
       </div>
-    </GeneralLayout>
+    </AppLayout>
     );
   }

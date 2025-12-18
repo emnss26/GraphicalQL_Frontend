@@ -4,13 +4,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect, useMemo } from "react";
+import { Check, X } from "lucide-react";
 
 export default function SheetsTable({
   data = [],
   onEdit = () => {},
   onDeleteRow = () => {},
 }) {
-  // Fechas
   const isoToDMY = (iso) => {
     if (!iso) return "";
     const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -18,9 +18,10 @@ export default function SheetsTable({
     const [, y, mm, dd] = m;
     return `${dd}/${mm}/${y}`;
   };
+
   const dmyToISO = (dmy) => {
     if (!dmy) return "";
-    const m = String(dmy).trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+    const m = String(dmy).trim().match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
     if (!m) return "";
     let [, dd, mm, yy] = m;
     const d = parseInt(dd, 10);
@@ -30,15 +31,14 @@ export default function SheetsTable({
     const dt = new Date(Date.UTC(y, mo, d));
     return isNaN(dt) ? "" : dt.toISOString().slice(0, 10);
   };
-  const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
-  const todayISO = new Date().toISOString().slice(0,10);
 
-  // Campos fecha editables
+  const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
+  const todayISO = new Date().toISOString().slice(0, 10);
+
   const DATE_FIELDS = useMemo(() => [
-    "plannedGenDate","actualGenDate","plannedReviewDate","actualReviewDate","plannedIssueDate","actualIssueDate",
+    "plannedGenDate", "actualGenDate", "plannedReviewDate", "actualReviewDate", "plannedIssueDate", "actualIssueDate",
   ], []);
 
-  // Normalizar fila
   const normalizeRow = (sheet) => ({
     id: sheet.id ?? sheet.plan_id ?? null,
     name: sheet.name ?? sheet.sheet_name ?? "",
@@ -56,9 +56,9 @@ export default function SheetsTable({
   });
 
   const [rows, setRows] = useState(() => Array.isArray(data) ? data.map(normalizeRow) : []);
-useEffect(() => {
-  setRows(Array.isArray(data) ? data.map(normalizeRow) : []);
-}, [data]);
+  useEffect(() => {
+    setRows(Array.isArray(data) ? data.map(normalizeRow) : []);
+  }, [data]);
 
   const handleChange = (idx, field, valueUI) => {
     setRows((prev) => {
@@ -74,11 +74,11 @@ useEffect(() => {
     }
   };
 
-  // === Helpers de progreso ===
   const cmpISO = (a, b) => {
     if (!a || !b) return 0;
     return new Date(a).getTime() - new Date(b).getTime();
   };
+
   const calcRealPct = (r) => {
     if (r.actualIssueDate) return 100;
     const inReview = r.hasApprovalFlow || (r.status && r.status !== "NOT_IN_REVIEW") || !!r.actualReviewDate;
@@ -86,6 +86,7 @@ useEffect(() => {
     if (r.actualGenDate) return 85;
     return 0;
   };
+
   const calcPlannedPct = (r) => {
     const planGen = r.plannedGenDate ? dmyToISO(r.plannedGenDate) : "";
     const planRev = r.plannedReviewDate ? dmyToISO(r.plannedReviewDate) : "";
@@ -111,145 +112,64 @@ useEffect(() => {
           />
         </div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Real <span className="font-medium">{real}%</span> · Plan{" "}
-          <span className="font-medium">{plan}%</span> · Δ{" "}
-          <span className={`font-medium ${delta < 0 ? "text-red-600" : delta > 0 ? "text-green-600" : ""}`}>
-            {sign}{delta} pp
-          </span>
+          Real <span className="font-medium">{real}%</span> · Plan <span className="font-medium">{plan}%</span> · Δ <span className={`font-medium ${delta < 0 ? "text-red-600" : delta > 0 ? "text-green-600" : ""}`}>{sign}{delta} pp</span>
         </div>
       </div>
     );
   };
 
   return (
-    <Table className="table-auto border-collapse w-full text-sm">
+    <Table className="table-auto border-collapse w-full text-xs">
       <TableHeader>
-        <TableRow className="text-sm">
-          <TableHead className="text-sm">#</TableHead>
-          <TableHead className="text-sm">Nombre de Plano</TableHead>
-          <TableHead className="text-sm">Número de Plano</TableHead>
-          <TableHead className="text-sm">Revisión Actual</TableHead>
-          <TableHead className="text-sm">Fecha de Revisión Actual</TableHead>
-
-          <TableHead className="text-sm">Fecha de generación (programada)</TableHead>
-          <TableHead className="text-sm">Fecha de generación (Docs)</TableHead>
-
-          <TableHead className="text-sm">Revisión técnica (programada)</TableHead>
-          <TableHead className="text-sm">Flujo de aprobación</TableHead>
-          <TableHead className="text-sm">Revisión técnica (real en ACC)</TableHead>
-
-          <TableHead className="text-sm">Emisión a construcción (programada)</TableHead>
-          <TableHead className="text-sm">Emisión a construcción (real)</TableHead>
-
-          <TableHead className="text-sm">Estatus de plano</TableHead>
-          <TableHead className="text-sm">Acciones</TableHead>
+        <TableRow className="text-xs">
+          <TableHead>#</TableHead>
+          <TableHead>Número de Plano</TableHead>
+          <TableHead>Nombre de Plano</TableHead>
+          <TableHead className="bg-blue-100">Revisión Actual</TableHead>
+          <TableHead className="bg-blue-100">Fecha de Revisión Actual</TableHead>
+          <TableHead>Fecha de generación (Programada)</TableHead>
+          <TableHead className="bg-gray-100">Fecha de generación (Docs)</TableHead>
+          <TableHead>Revisión técnica (Programada)</TableHead>
+          <TableHead className="bg-gray-100">Flujo de aprobación</TableHead>
+          <TableHead className="bg-gray-100">Revisión técnica (Real)</TableHead>
+          <TableHead>Emisión a construcción (Programada)</TableHead>
+          <TableHead className="bg-gray-100">Emisión a construcción (Real)</TableHead>
+          <TableHead>Estatus de plano</TableHead>
+          <TableHead>Acciones</TableHead>
         </TableRow>
       </TableHeader>
-
       <TableBody>
         {rows.map((r, idx) => {
           const approvalYes = r.hasApprovalFlow || (r.status && r.status !== "NOT_IN_REVIEW") || !!r.actualReviewDate;
           return (
             <TableRow key={r.id ?? `tmp-${idx}`}>
               <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-
-              {/* Nombre */}
               <TableCell>
-                <Input
-                  type="text"
-                  value={r.name}
-                  onChange={(e) => handleChange(idx, "name", e.target.value)}
-                  placeholder="Ej. Planta Arquitectónica"
-                  className="h-8 text-sm"
-                />
+                <Input type="text" value={r.number} onChange={(e) => handleChange(idx, "number", e.target.value)} className="h-8 text-xs [&>input]:text-xs" />
               </TableCell>
-
-              {/* Número */}
+              <TableCell className="min-w-[220px] max-w-[360px]">
+                <Input type="text" value={r.name} onChange={(e) => handleChange(idx, "name", e.target.value)} className="h-8 truncate text-xs [&>input]:text-xs" />
+              </TableCell>
+              <TableCell className="bg-blue-100">{r.currentRevision ?? ""}</TableCell>
+              <TableCell className="bg-blue-100">{r.currentRevisionDate ?? ""}</TableCell>
               <TableCell>
-                <Input
-                  type="text"
-                  value={r.number}
-                  onChange={(e) => handleChange(idx, "number", e.target.value)}
-                  placeholder="Ej. A-101"
-                  className="h-8 text-sm"
-                />
+                <Input type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}" placeholder="dd/mm/aaaa" value={r.plannedGenDate || ""} onChange={(e) => handleChange(idx, "plannedGenDate", e.target.value)} className="h-8 text-xs [&>input]:text-xs" />
               </TableCell>
-
-              {/* Revisión actual (solo lectura) */}
-              <TableCell>{r.currentRevision ?? ""}</TableCell>
-              <TableCell>{r.currentRevisionDate ?? ""}</TableCell>
-
-              {/* Fechas */}
+              <TableCell className="bg-gray-100">{r.actualGenDate || ""}</TableCell>
               <TableCell>
-                <Input
-                  type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}"
-                  placeholder="dd/mm/aaaa" value={r.plannedGenDate || ""}
-                  onChange={(e) => handleChange(idx, "plannedGenDate", e.target.value)}
-                  className="h-8 text-sm"
-                />
+                <Input type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}" placeholder="dd/mm/aaaa" value={r.plannedReviewDate || ""} onChange={(e) => handleChange(idx, "plannedReviewDate", e.target.value)} className="h-8 text-xs [&>input]:text-xs" />
               </TableCell>
-
+              <TableCell className="bg-gray-100 text-center">{approvalYes ? <Check className="w-4 h-4 text-green-600 inline" /> : <X className="w-4 h-4 text-red-500 inline" />}</TableCell>
+              <TableCell className="bg-gray-100">{r.actualReviewDate || ""}</TableCell>
               <TableCell>
-                <Input
-                  type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}"
-                  placeholder="dd/mm/aaaa" value={r.actualGenDate || ""}
-                  onChange={(e) => handleChange(idx, "actualGenDate", e.target.value)}
-                  className="h-8 text-sm"
-                />
+                <Input type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}" placeholder="dd/mm/aaaa" value={r.plannedIssueDate || ""} onChange={(e) => handleChange(idx, "plannedIssueDate", e.target.value)} className="h-8 text-xs [&>input]:text-xs" />
               </TableCell>
-
-              <TableCell>
-                <Input
-                  type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}"
-                  placeholder="dd/mm/aaaa" value={r.plannedReviewDate || ""}
-                  onChange={(e) => handleChange(idx, "plannedReviewDate", e.target.value)}
-                  className="h-8 text-sm"
-                />
-              </TableCell>
-
-              {/* Flujo de aprobación (read-only; robusto) */}
-              <TableCell>{approvalYes ? "Sí" : "No"}</TableCell>
-
-              <TableCell>
-                <Input
-                  type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}"
-                  placeholder="dd/mm/aaaa" value={r.actualReviewDate || ""}
-                  onChange={(e) => handleChange(idx, "actualReviewDate", e.target.value)}
-                  className="h-8 text-sm"
-                />
-              </TableCell>
-
-              <TableCell>
-                <Input
-                  type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}"
-                  placeholder="dd/mm/aaaa" value={r.plannedIssueDate || ""}
-                  onChange={(e) => handleChange(idx, "plannedIssueDate", e.target.value)}
-                  className="h-8 text-sm"
-                />
-              </TableCell>
-
-              <TableCell>
-                <Input
-                  type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}"
-                  placeholder="dd/mm/aaaa" value={r.actualIssueDate || ""}
-                  onChange={(e) => handleChange(idx, "actualIssueDate", e.target.value)}
-                  className="h-8 text-sm"
-                />
-              </TableCell>
-
-              {/* Barra de estatus */}
+              <TableCell className="bg-gray-100">{r.actualIssueDate || ""}</TableCell>
               <TableCell>
                 <ProgressCell r={r} />
               </TableCell>
-
-              {/* Acciones */}
               <TableCell>
-                <Button
-                  variant="outline" className="text-red-600 h-8"
-                  onClick={() => onDeleteRow(idx)} title="Eliminar fila"
-                >
-                  Eliminar
-                </Button>
+                <Button variant="outline" className="text-red-600 h-8" onClick={() => onDeleteRow(idx)} title="Eliminar fila">Eliminar</Button>
               </TableCell>
             </TableRow>
           );

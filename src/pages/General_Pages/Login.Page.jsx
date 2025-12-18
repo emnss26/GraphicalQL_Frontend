@@ -1,5 +1,5 @@
 import React from "react";
-import GeneralLayout from "@/components/general_component/GeneralLayout";
+import AppLayout from "@/components/general_component/AppLayout";
 
 const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 const clientId = import.meta.env.VITE_CLIENT_ID;
@@ -19,7 +19,7 @@ const LoginPage = () => {
   };
 
   return (
-    <GeneralLayout>
+    <AppLayout noPadding={true}>
       <div className="h-full grid grid-cols-1 md:grid-cols-2 bg-white">
         {/* Columna izquierda: logo */}
         <div className="flex items-center justify-center p-6">
@@ -63,7 +63,7 @@ const LoginPage = () => {
           </div>
         </div>
       </div>
-    </GeneralLayout>
+    </AppLayout>
   );
 };
 export default LoginPage;

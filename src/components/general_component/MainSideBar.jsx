@@ -23,7 +23,7 @@ export default function MainSideBar() {
     <aside
       className={cn(
         "bg-gray-100 border-r border-gray-200 flex flex-col transition-all",
-        collapsed ? "w-16" : "w-60"
+        collapsed ? "w-15" : "w-45"
       )}
     >
       <div className="border-b border-gray-200 p-2">
