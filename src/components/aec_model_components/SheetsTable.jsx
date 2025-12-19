@@ -1,180 +1,578 @@
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect, useMemo } from "react";
-import { Check, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Check, X, Trash2, Calendar, FileText, ClipboardCheck, Send,
+  ChevronUp, ChevronDown, ChevronsUpDown, Columns3, Search, Filter, Eye, EyeOff,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
+/* --- CONFIGURACIÓN DE COLUMNAS --- */
+const COLUMN_DEFINITIONS = [
+  { id: "index", label: "#", group: "basic", width: "w-12" },
+  { id: "number", label: "N° Plano", group: "basic", sortable: true, width: "min-w-[100px]" },
+  { id: "name", label: "Nombre", group: "basic", sortable: true, width: "min-w-[140px]" },
+  { id: "currentRevision", label: "Rev.", group: "basic", tooltip: "Revisión actual del plano", sortable: true, width: "w-20" },
+  { id: "currentRevisionDate", label: "Fecha Rev.", group: "basic", sortable: true, width: "w-28" },
+  
+  { id: "plannedGenDate", label: "Gen. Programada", group: "generation", tooltip: "Fecha programada de generación", sortable: true, width: "w-36" },
+  { id: "actualGenDate", label: "Gen. Real", group: "generation", sortable: true, width: "w-28" },
+  { id: "docsVersion", label: "Ver.", group: "generation", width: "w-16" },
+  { id: "docsVersionDate", label: "Últ. Versión", group: "generation", sortable: true, width: "w-28" },
+  
+  { id: "plannedReviewDate", label: "Rev. Programada", group: "review", tooltip: "Fecha programada de revisión técnica", sortable: true, width: "w-36" },
+  { id: "hasApprovalFlow", label: "Aprob.", group: "review", tooltip: "Aprobación en Docs", width: "w-20" },
+  { id: "actualReviewDate", label: "Rev. Real", group: "review", sortable: true, width: "w-28" },
+  { id: "lastReviewDate", label: "Últ. Flujo", group: "review", sortable: true, width: "w-28" },
+  { id: "lastReviewStatus", label: "Estado Flujo", group: "review", sortable: true, width: "w-24" },
+  
+  { id: "plannedIssueDate", label: "Emisión Prog.", group: "issue", tooltip: "Fecha programada de emisión a construcción", sortable: true, width: "w-36" },
+  { id: "actualIssueDate", label: "Emisión Real", group: "issue", sortable: true, width: "w-28" },
+  { id: "issueUpdatedAt", label: "Actualizado", group: "issue", sortable: true, width: "w-28" },
+  { id: "issueVersionSetName", label: "Conjunto", group: "issue", sortable: true, width: "w-24" },
+  
+  { id: "progress", label: "Progreso", group: "status", width: "w-32" },
+  { id: "actions", label: "Acciones", group: "status", width: "w-24" },
+];
+
+const COLUMN_GROUPS = {
+  basic: { label: "Información Básica", color: "bg-zinc-500" },
+  generation: { label: "Generación", color: "bg-blue-500" },
+  review: { label: "Revisión", color: "bg-purple-500" },
+  issue: { label: "Emisión", color: "bg-blue-500" },
+  status: { label: "Estado", color: "bg-zinc-500" },
+};
+
+/* --- HELPERS --- */
+const isoToDMY = (iso) => {
+  if (!iso) return "";
+  const m = String(iso).substring(0, 10).match(/^\d{4}-\d{2}-\d{2}$/);
+  if (!m) return "";
+  const [y, mm, dd] = m[0].split("-");
+  return `${dd}/${mm}/${y}`;
+};
+
+const dmyToISO = (dmy) => {
+  if (!dmy) return "";
+  const m = String(dmy).trim().match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})$/);
+  if (!m) return "";
+  let [, dd, mm, yy] = m;
+  const d = parseInt(dd, 10);
+  const mo = parseInt(mm, 10) - 1;
+  let y = parseInt(yy, 10);
+  if (y < 100) y = 2000 + y;
+  const dt = new Date(Date.UTC(y, mo, d));
+  return isNaN(dt) ? "" : dt.toISOString().slice(0, 10);
+};
+
+const toInputDateValue = (dmy) => {
+  if (!dmy) return "";
+  const parts = dmy.split('/');
+  if (parts.length !== 3) return "";
+  return `${parts[2]}-${parts[1]}-${parts[0]}`;
+};
+
+const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
+
+/* --- SUB-COMPONENTES --- */
+
+const ProgressBar = ({ pct }) => {
+  let info = { color: "bg-gray-300", label: "Pendiente", textColor: "text-gray-500" };
+  
+  if (pct >= 100) info = { color: "bg-green-600", label: "Completado", textColor: "text-green-700" };
+  else if (pct >= 66) info = { color: "bg-blue-600", label: "En revisión", textColor: "text-blue-700" };
+  else if (pct >= 33) info = { color: "bg-yellow-500", label: "Generado", textColor: "text-yellow-700" };
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex flex-col gap-1 min-w-[80px]">
+            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${info.color}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[10px]">
+               <span className={`font-medium ${info.textColor}`}>{info.label}</span>
+               <span className="font-bold">{pct}%</span>
+            </div>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          {info.label} ({pct}%)
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
+const StatusBadge = ({ status }) => {
+  const s = String(status || "").toUpperCase();
+  let variant = "outline";
+  let className = "text-[10px]";
+
+  if (s === "APPROVED" || s === "APROBADO") {
+    variant = "default";
+    className += " bg-emerald-500 hover:bg-emerald-600 text-white";
+  } else if (s === "REJECTED" || s === "RECHAZADO") {
+    variant = "destructive";
+  } else if (s.includes("REVIEW") || s.includes("REVISION")) {
+    variant = "default";
+    className += " bg-blue-500 hover:bg-blue-600 text-white";
+  } else {
+    className += " text-muted-foreground";
+  }
+
+  return (
+    <Badge variant={variant} className={className}>
+      {status || "—"}
+    </Badge>
+  );
+};
+
+const DateCell = ({ value, editable, onChange, onBlur }) => {
+  if (editable) {
+    return (
+      <div className="relative group w-full">
+        <Input
+          type="date"
+          value={toInputDateValue(value)}
+          onChange={(e) => onChange?.(e.target.value)}
+          onBlur={onBlur}
+          className="h-7 text-xs cursor-pointer px-1 pr-6 w-full"
+        />
+        {/* Icono decorativo */}
+        <Calendar className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none opacity-50" />
+      </div>
+    );
+  }
+  return <span className={cn("text-xs whitespace-nowrap", !value && "text-muted-foreground italic")}>{value || "—"}</span>;
+};
+
+const SortableHeader = ({ children, tooltip, icon: Icon, sortable, sortDirection, onSort, className }) => {
+  const content = (
+    <div
+      className={cn("flex items-center gap-1.5 select-none", sortable && "cursor-pointer hover:text-foreground transition-colors", className)}
+      onClick={sortable ? onSort : undefined}
+    >
+      {Icon && <Icon className="h-3 w-3 opacity-70" />}
+      <span className="truncate font-semibold">{children}</span>
+      {sortable && (
+        <span className="ml-auto">
+          {sortDirection === "asc" ? <ChevronUp className="h-3 w-3" /> : 
+           sortDirection === "desc" ? <ChevronDown className="h-3 w-3" /> : 
+           <ChevronsUpDown className="h-3 w-3 opacity-30" />}
+        </span>
+      )}
+    </div>
+  );
+
+  if (tooltip) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>{content}</TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">{tooltip}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  return content;
+};
+
+const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
+  // Agrupar columnas
+  const groups = useMemo(() => {
+    const g = {};
+    columns.forEach(col => {
+      if(!g[col.group]) g[col.group] = [];
+      g[col.group].push(col);
+    });
+    return g;
+  }, [columns]);
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-9 gap-2 border-dashed">
+          <Columns3 className="h-4 w-4" />
+          <span className="hidden sm:inline">Columnas</span>
+          <Badge variant="secondary" className="h-5 px-1 text-[10px]">{visibleColumns.size}</Badge>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-0" align="end">
+        <div className="p-3 border-b bg-muted/20">
+          <h4 className="font-medium text-sm">Visibilidad de columnas</h4>
+        </div>
+        <div className="max-h-[300px] overflow-y-auto p-2">
+          {Object.entries(groups).map(([groupKey, cols]) => (
+            <div key={groupKey} className="mb-4 last:mb-0">
+              <div className="flex items-center gap-2 px-2 mb-2">
+                <div className={cn("w-2 h-2 rounded-full", COLUMN_GROUPS[groupKey]?.color)} />
+                <span className="text-xs font-bold text-muted-foreground uppercase">{COLUMN_GROUPS[groupKey]?.label}</span>
+              </div>
+              {cols.map(col => (
+                <div key={col.id} className="flex items-center gap-2 px-2 py-1 hover:bg-accent rounded cursor-pointer" onClick={() => onToggle(col.id)}>
+                  <Checkbox checked={visibleColumns.has(col.id)} id={`col-${col.id}`} onCheckedChange={() => onToggle(col.id)} />
+                  <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1">{col.label}</label>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+/* --- COMPONENTE PRINCIPAL --- */
 export default function SheetsTable({
   data = [],
   onEdit = () => {},
   onDeleteRow = () => {},
 }) {
-  const isoToDMY = (iso) => {
-    if (!iso) return "";
-    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return "";
-    const [, y, mm, dd] = m;
-    return `${dd}/${mm}/${y}`;
-  };
-
-  const dmyToISO = (dmy) => {
-    if (!dmy) return "";
-    const m = String(dmy).trim().match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
-    if (!m) return "";
-    let [, dd, mm, yy] = m;
-    const d = parseInt(dd, 10);
-    const mo = parseInt(mm, 10) - 1;
-    let y = parseInt(yy, 10);
-    if (y < 100) y = 2000 + y;
-    const dt = new Date(Date.UTC(y, mo, d));
-    return isNaN(dt) ? "" : dt.toISOString().slice(0, 10);
-  };
-
-  const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
-  const todayISO = new Date().toISOString().slice(0, 10);
+  // Estados para filtro, orden y visibilidad
+  const [rows, setRows] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortConfig, setSortConfig] = useState({ field: "", direction: null });
+  // Inicialmente todas visibles
+  const [visibleColumns, setVisibleColumns] = useState(new Set(COLUMN_DEFINITIONS.map(c => c.id)));
 
   const DATE_FIELDS = useMemo(() => [
     "plannedGenDate", "actualGenDate", "plannedReviewDate", "actualReviewDate", "plannedIssueDate", "actualIssueDate",
   ], []);
 
+  // Normalización de datos (tu lógica existente + mapeo seguro)
   const normalizeRow = (sheet) => ({
     id: sheet.id ?? sheet.plan_id ?? null,
     name: sheet.name ?? sheet.sheet_name ?? "",
     number: sheet.number ?? sheet.sheet_number ?? "",
-    currentRevision: sheet.currentRevision ?? sheet.current_revision ?? sheet.revision ?? "",
-    currentRevisionDate: isoToDMY(sheet.currentRevisionDate ?? sheet.current_revision_date ?? sheet.revisionDate ?? ""),
+    currentRevision: sheet.currentRevision ?? sheet.current_revision ?? "",
+    currentRevisionDate: isoToDMY(sheet.currentRevisionDate ?? sheet.current_revision_date ?? ""),
     plannedGenDate: isoToDMY(sheet.plannedGenDate ?? sheet.planned_gen_date ?? ""),
     actualGenDate: isoToDMY(sheet.actualGenDate ?? sheet.actual_gen_date ?? ""),
+    docsVersion: sheet.docsVersion ?? sheet.docs_version_number ?? "",
+    docsVersionDate: isoToDMY(sheet.docsVersionDate ?? sheet.docs_last_modified ?? ""),
     plannedReviewDate: isoToDMY(sheet.plannedReviewDate ?? sheet.planned_review_date ?? ""),
     actualReviewDate: isoToDMY(sheet.actualReviewDate ?? sheet.actual_review_date ?? ""),
+    hasApprovalFlow: toBool(sheet.hasApprovalFlow ?? sheet.has_approval_flow ?? false),
+    lastReviewDate: isoToDMY(sheet.lastReviewDate ?? sheet.latest_review_date ?? ""),
+    lastReviewStatus: sheet.lastReviewStatus ?? sheet.latest_review_status ?? "",
     plannedIssueDate: isoToDMY(sheet.plannedIssueDate ?? sheet.planned_issue_date ?? ""),
     actualIssueDate: isoToDMY(sheet.actualIssueDate ?? sheet.actual_issue_date ?? ""),
-    hasApprovalFlow: toBool(sheet.hasApprovalFlow ?? sheet.has_approval_flow ?? false),
+    issueUpdatedAt: isoToDMY(sheet.issueUpdatedAt ?? sheet.sheet_updated_at ?? ""),
+    issueVersionSetName: sheet.issueVersionSetName ?? sheet.sheet_version_set ?? "",
     status: sheet.status ?? "",
   });
 
-  const [rows, setRows] = useState(() => Array.isArray(data) ? data.map(normalizeRow) : []);
   useEffect(() => {
     setRows(Array.isArray(data) ? data.map(normalizeRow) : []);
   }, [data]);
 
-  const handleChange = (idx, field, valueUI) => {
-    setRows((prev) => {
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], [field]: valueUI };
-      return updated;
+  // --- Lógica de Procesamiento (Search + Sort) ---
+  const processedRows = useMemo(() => {
+    let result = [...rows];
+
+    // 1. Filtrado
+    if (searchTerm) {
+      const lower = searchTerm.toLowerCase();
+      result = result.filter(r => 
+        r.name.toLowerCase().includes(lower) || 
+        r.number.toLowerCase().includes(lower) ||
+        r.issueVersionSetName.toLowerCase().includes(lower)
+      );
+    }
+
+    // 2. Ordenamiento
+    if (sortConfig.field && sortConfig.direction) {
+      result.sort((a, b) => {
+        const valA = a[sortConfig.field] || "";
+        const valB = b[sortConfig.field] || "";
+        
+        // Comparación simple de strings (funciona bien para fechas ISO y textos)
+        // Para fechas DD/MM/YYYY, idealmente convertir a ISO antes de comparar, 
+        // pero por simplicidad comparamos strings. Si necesitas orden estricto de fechas DD/MM, avísame.
+        if (valA < valB) return sortConfig.direction === "asc" ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [rows, searchTerm, sortConfig]);
+
+  // --- Manejadores ---
+
+  const handleSort = (field) => {
+    setSortConfig(prev => {
+      if (prev.field !== field) return { field, direction: "asc" };
+      if (prev.direction === "asc") return { field, direction: "desc" };
+      return { field: "", direction: null };
     });
+  };
+
+  const toggleColumn = (id) => {
+    setVisibleColumns(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Función crítica: Encuentra el índice REAL en 'data' original basado en el objeto fila
+  const getOriginalIndex = (rowObject) => {
+    return rows.indexOf(rowObject);
+  };
+
+  // Actualiza estado visual
+  const handleChange = (rowObject, field, value) => {
+    const idx = getOriginalIndex(rowObject);
+    if (idx === -1) return;
+
+    setRows(prev => {
+      const clone = [...prev];
+      clone[idx] = { ...clone[idx], [field]: value };
+      return clone;
+    });
+  };
+
+  // Guarda en BD (usa el índice original para que funcione onEdit)
+  const handleBlur = (rowObject, field, value) => {
+    const idx = getOriginalIndex(rowObject);
+    if (idx === -1) return;
+
     if (DATE_FIELDS.includes(field)) {
-      const iso = dmyToISO(valueUI) || "";
+      const iso = dmyToISO(value) || null;
       onEdit(idx, field, iso);
     } else {
-      onEdit(idx, field, valueUI);
+      onEdit(idx, field, value);
     }
   };
 
-  const cmpISO = (a, b) => {
-    if (!a || !b) return 0;
-    return new Date(a).getTime() - new Date(b).getTime();
+  // Input Date Handler
+  const handleDateInput = (rowObject, field, dateValueYYYYMMDD) => {
+    if (!dateValueYYYYMMDD) {
+      handleChange(rowObject, field, "");
+      return;
+    }
+    const [y, m, d] = dateValueYYYYMMDD.split('-');
+    const newDMY = `${d}/${m}/${y}`;
+    handleChange(rowObject, field, newDMY);
   };
 
-  const calcRealPct = (r) => {
+  const getProgress = (r) => {
     if (r.actualIssueDate) return 100;
-    const inReview = r.hasApprovalFlow || (r.status && r.status !== "NOT_IN_REVIEW") || !!r.actualReviewDate;
-    if (inReview) return 90;
-    if (r.actualGenDate) return 85;
+    if (r.actualReviewDate) return 66;
+    if (r.actualGenDate) return 33;
     return 0;
   };
 
-  const calcPlannedPct = (r) => {
-    const planGen = r.plannedGenDate ? dmyToISO(r.plannedGenDate) : "";
-    const planRev = r.plannedReviewDate ? dmyToISO(r.plannedReviewDate) : "";
-    const planIss = r.plannedIssueDate ? dmyToISO(r.plannedIssueDate) : "";
-    if (planIss && cmpISO(todayISO, planIss) >= 0) return 100;
-    if (planRev && cmpISO(todayISO, planRev) >= 0) return 90;
-    if (planGen && cmpISO(todayISO, planGen) >= 0) return 85;
-    return 0;
-  };
+  const isVisible = (id) => visibleColumns.has(id);
 
-  const ProgressCell = ({ r }) => {
-    const real = calcRealPct(r);
-    const plan = calcPlannedPct(r);
-    const delta = real - plan;
-    const sign = delta > 0 ? "+" : "";
-    return (
-      <div className="min-w-[220px]">
-        <div className="w-full h-3 bg-neutral-200 rounded-full overflow-hidden">
-          <div
-            className="h-3 bg-[rgb(170,32,47)]"
-            style={{ width: `${Math.max(0, Math.min(100, real))}%` }}
-            title={`Real ${real}%`}
+  // --- RENDER ---
+  return (
+    <div className="space-y-4">
+      {/* BARRA DE HERRAMIENTAS (Search & Filter) */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between bg-card p-2 rounded-lg border">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por número, nombre o conjunto..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9 h-9 bg-background"
           />
+          {searchTerm && (
+            <Button variant="ghost" size="sm" className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0" onClick={() => setSearchTerm("")}>
+              <X className="h-3 w-3" />
+            </Button>
+          )}
         </div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          Real <span className="font-medium">{real}%</span> · Plan <span className="font-medium">{plan}%</span> · Δ <span className={`font-medium ${delta < 0 ? "text-red-600" : delta > 0 ? "text-green-600" : ""}`}>{sign}{delta} pp</span>
+        <div className="flex items-center gap-2">
+          <ColumnVisibilitySelector columns={COLUMN_DEFINITIONS} visibleColumns={visibleColumns} onToggle={toggleColumn} />
+          {searchTerm && (
+            <Badge variant="secondary" className="h-9 px-3">
+              <Filter className="h-3 w-3 mr-1" /> {processedRows.length} resultados
+            </Badge>
+          )}
         </div>
       </div>
-    );
-  };
 
-  return (
-    <Table className="table-auto border-collapse w-full text-xs">
-      <TableHeader>
-        <TableRow className="text-xs">
-          <TableHead>#</TableHead>
-          <TableHead>Número de Plano</TableHead>
-          <TableHead>Nombre de Plano</TableHead>
-          <TableHead className="bg-blue-100">Revisión Actual</TableHead>
-          <TableHead className="bg-blue-100">Fecha de Revisión Actual</TableHead>
-          <TableHead>Fecha de generación (Programada)</TableHead>
-          <TableHead className="bg-gray-100">Fecha de generación (Docs)</TableHead>
-          <TableHead>Revisión técnica (Programada)</TableHead>
-          <TableHead className="bg-gray-100">Flujo de aprobación</TableHead>
-          <TableHead className="bg-gray-100">Revisión técnica (Real)</TableHead>
-          <TableHead>Emisión a construcción (Programada)</TableHead>
-          <TableHead className="bg-gray-100">Emisión a construcción (Real)</TableHead>
-          <TableHead>Estatus de plano</TableHead>
-          <TableHead>Acciones</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((r, idx) => {
-          const approvalYes = r.hasApprovalFlow || (r.status && r.status !== "NOT_IN_REVIEW") || !!r.actualReviewDate;
-          return (
-            <TableRow key={r.id ?? `tmp-${idx}`}>
-              <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-              <TableCell>
-                <Input type="text" value={r.number} onChange={(e) => handleChange(idx, "number", e.target.value)} className="h-8 text-xs [&>input]:text-xs" />
-              </TableCell>
-              <TableCell className="min-w-[220px] max-w-[360px]">
-                <Input type="text" value={r.name} onChange={(e) => handleChange(idx, "name", e.target.value)} className="h-8 truncate text-xs [&>input]:text-xs" />
-              </TableCell>
-              <TableCell className="bg-blue-100">{r.currentRevision ?? ""}</TableCell>
-              <TableCell className="bg-blue-100">{r.currentRevisionDate ?? ""}</TableCell>
-              <TableCell>
-                <Input type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}" placeholder="dd/mm/aaaa" value={r.plannedGenDate || ""} onChange={(e) => handleChange(idx, "plannedGenDate", e.target.value)} className="h-8 text-xs [&>input]:text-xs" />
-              </TableCell>
-              <TableCell className="bg-gray-100">{r.actualGenDate || ""}</TableCell>
-              <TableCell>
-                <Input type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}" placeholder="dd/mm/aaaa" value={r.plannedReviewDate || ""} onChange={(e) => handleChange(idx, "plannedReviewDate", e.target.value)} className="h-8 text-xs [&>input]:text-xs" />
-              </TableCell>
-              <TableCell className="bg-gray-100 text-center">{approvalYes ? <Check className="w-4 h-4 text-green-600 inline" /> : <X className="w-4 h-4 text-red-500 inline" />}</TableCell>
-              <TableCell className="bg-gray-100">{r.actualReviewDate || ""}</TableCell>
-              <TableCell>
-                <Input type="text" inputMode="numeric" pattern="\\d{1,2}/\\d{1,2}/\\d{2,4}" placeholder="dd/mm/aaaa" value={r.plannedIssueDate || ""} onChange={(e) => handleChange(idx, "plannedIssueDate", e.target.value)} className="h-8 text-xs [&>input]:text-xs" />
-              </TableCell>
-              <TableCell className="bg-gray-100">{r.actualIssueDate || ""}</TableCell>
-              <TableCell>
-                <ProgressCell r={r} />
-              </TableCell>
-              <TableCell>
-                <Button variant="outline" className="text-red-600 h-8" onClick={() => onDeleteRow(idx)} title="Eliminar fila">Eliminar</Button>
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+      {/* TABLA PRINCIPAL */}
+      <div className="rounded-md border bg-card overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <Table className="w-full text-xs">
+            <TableHeader>
+              {/* Fila de Grupos */}
+              <TableRow className="bg-muted/50 border-b border-border hover:bg-muted/50">
+                {isVisible("index") && <TableHead className="py-1" />}
+                {/* Lógica para colSpans dinámicos por grupo */}
+                {Object.keys(COLUMN_GROUPS).map(groupKey => {
+                   const groupCols = COLUMN_DEFINITIONS.filter(c => c.group === groupKey && isVisible(c.id));
+                   if (groupCols.length === 0) return null;
+                   const style = groupKey === "generation" || groupKey === "issue" ? "bg-blue-50 text-blue-700 border-b-blue-200" : "bg-zinc-50 text-zinc-700 border-b-zinc-200";
+                   
+                   return (
+                     <TableHead key={groupKey} colSpan={groupCols.length} className={`text-center py-2 text-[10px] font-bold uppercase tracking-wider border-l border-r border-white ${style}`}>
+                       {COLUMN_GROUPS[groupKey].label}
+                     </TableHead>
+                   );
+                })}
+              </TableRow>
+
+              {/* Fila de Columnas */}
+              <TableRow className="bg-background border-b-2 border-border hover:bg-background">
+                {COLUMN_DEFINITIONS.map((col) => {
+                  if (!isVisible(col.id)) return null;
+                  
+                  let cellClass = "h-10 px-3 py-2 border-r last:border-r-0 border-border/50";
+                  if (col.group === "generation" || col.group === "issue") cellClass += " bg-blue-50/30";
+
+                  return (
+                    <TableHead key={col.id} className={`${col.width} ${cellClass}`}>
+                      <SortableHeader
+                        icon={col.id === "number" ? FileText : col.id.includes("Date") ? Calendar : null}
+                        tooltip={col.tooltip}
+                        sortable={col.sortable}
+                        sortDirection={sortConfig.field === col.id ? sortConfig.direction : null}
+                        onSort={() => handleSort(col.id)}
+                      >
+                        {col.label}
+                      </SortableHeader>
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            </TableHeader>
+
+            <TableBody>
+              {processedRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={visibleColumns.size} className="h-32 text-center text-muted-foreground">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <FileText className="h-8 w-8 opacity-20" />
+                      <p>No se encontraron planos</p>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                processedRows.map((r) => {
+                  // Obtenemos el índice REAL para las funciones de borrado
+                  const realIndex = getOriginalIndex(r); 
+                  const progress = getProgress(r);
+                  const isComplete = progress === 100;
+
+                  return (
+                    <TableRow key={r.id || `temp-${Math.random()}`} className={`group hover:bg-muted/50 transition-colors ${isComplete ? "bg-green-50/40 hover:bg-green-50/60" : ""}`}>
+                      
+                      {isVisible("index") && (
+                        <TableCell className="text-center font-mono text-muted-foreground bg-muted/20 border-r">{realIndex + 1}</TableCell>
+                      )}
+
+                      {/* --- BASIC --- */}
+                      {isVisible("number") && (
+                        <TableCell className="p-1 border-r">
+                          <Input 
+                            value={r.number} 
+                            onChange={(e) => handleChange(r, "number", e.target.value)} 
+                            onBlur={(e) => handleBlur(r, "number", e.target.value)} 
+                            className="h-7 text-xs border-transparent focus:border-primary bg-transparent font-medium" 
+                          />
+                        </TableCell>
+                      )}
+                      {isVisible("name") && (
+                        <TableCell className="p-1 border-r">
+                          <Input 
+                            value={r.name} 
+                            onChange={(e) => handleChange(r, "name", e.target.value)} 
+                            onBlur={(e) => handleBlur(r, "name", e.target.value)} 
+                            className="h-7 text-xs border-transparent focus:border-primary bg-transparent" 
+                          />
+                        </TableCell>
+                      )}
+                      {isVisible("currentRevision") && <TableCell className="text-center border-r"><Badge variant="outline" className="bg-white">{r.currentRevision}</Badge></TableCell>}
+                      {isVisible("currentRevisionDate") && <TableCell className="border-r text-muted-foreground">{r.currentRevisionDate}</TableCell>}
+
+                      {/* --- GENERATION --- */}
+                      {isVisible("plannedGenDate") && (
+                        <TableCell className="p-1 border-r bg-blue-50/10">
+                          <DateCell editable value={r.plannedGenDate} onChange={(v) => handleDateInput(r, "plannedGenDate", v)} onBlur={() => handleBlur(r, "plannedGenDate", r.plannedGenDate)} />
+                        </TableCell>
+                      )}
+                      {isVisible("actualGenDate") && <TableCell className="border-r bg-blue-50/20"><DateCell value={r.actualGenDate} /></TableCell>}
+                      {isVisible("docsVersion") && <TableCell className="text-center border-r bg-blue-50/20 font-mono">{r.docsVersion}</TableCell>}
+                      {isVisible("docsVersionDate") && <TableCell className="border-r bg-blue-50/20"><DateCell value={r.docsVersionDate} /></TableCell>}
+
+                      {/* --- REVIEW --- */}
+                      {isVisible("plannedReviewDate") && (
+                        <TableCell className="p-1 border-r">
+                          <DateCell editable value={r.plannedReviewDate} onChange={(v) => handleDateInput(r, "plannedReviewDate", v)} onBlur={() => handleBlur(r, "plannedReviewDate", r.plannedReviewDate)} />
+                        </TableCell>
+                      )}
+                      {isVisible("hasApprovalFlow") && (
+                        <TableCell className="text-center border-r">
+                          {r.hasApprovalFlow ? <Check className="h-4 w-4 text-emerald-500 mx-auto" /> : <div className="h-1.5 w-1.5 rounded-full bg-gray-200 mx-auto" />}
+                        </TableCell>
+                      )}
+                      {isVisible("actualReviewDate") && <TableCell className="border-r"><DateCell value={r.actualReviewDate} /></TableCell>}
+                      {isVisible("lastReviewDate") && <TableCell className="border-r"><DateCell value={r.lastReviewDate} /></TableCell>}
+                      {isVisible("lastReviewStatus") && <TableCell className="border-r"><StatusBadge status={r.lastReviewStatus} /></TableCell>}
+
+                      {/* --- ISSUE --- */}
+                      {isVisible("plannedIssueDate") && (
+                        <TableCell className="p-1 border-r bg-blue-50/10">
+                          <DateCell editable value={r.plannedIssueDate} onChange={(v) => handleDateInput(r, "plannedIssueDate", v)} onBlur={() => handleBlur(r, "plannedIssueDate", r.plannedIssueDate)} />
+                        </TableCell>
+                      )}
+                      {isVisible("actualIssueDate") && <TableCell className="border-r bg-blue-50/20"><DateCell value={r.actualIssueDate} /></TableCell>}
+                      {isVisible("issueUpdatedAt") && <TableCell className="border-r bg-blue-50/20"><DateCell value={r.issueUpdatedAt} /></TableCell>}
+                      {isVisible("issueVersionSetName") && <TableCell className="border-r bg-blue-50/20 text-muted-foreground">{r.issueVersionSetName}</TableCell>}
+
+                      {/* --- STATUS --- */}
+                      {isVisible("progress") && (
+                        <TableCell className="px-2 border-r bg-gray-50/30">
+                          <ProgressBar pct={progress} />
+                        </TableCell>
+                      )}
+                      {isVisible("actions") && (
+                        <TableCell className="text-center bg-gray-50/30">
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={() => onDeleteRow(realIndex)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
+                      )}
+
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+      
+      {/* FOOTER INFO */}
+      <div className="flex justify-between items-center text-xs text-muted-foreground px-1">
+        <div>Mostrando {processedRows.length} de {rows.length} registros</div>
+        <div className="flex gap-4">
+           <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Generación/Emisión</div>
+           <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Revisión</div>
+        </div>
+      </div>
+    </div>
   );
 }
