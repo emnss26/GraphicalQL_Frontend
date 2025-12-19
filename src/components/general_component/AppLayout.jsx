@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useCookies } from "react-cookie";
 import { 
   Building2, Home, FileSpreadsheet, LogOut, 
-  ChevronLeft, ChevronRight, Bell 
+  ChevronLeft, ChevronRight 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,6 @@ export default function AppLayout({ children, noPadding = false }) {
   const [collapsed, setCollapsed] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  // Lógica para mostrar el Sidebar SOLO en la ruta de detalles del plan
   const showSidebar = location.pathname.startsWith("/plans/");
 
   useEffect(() => {
@@ -59,7 +58,7 @@ export default function AppLayout({ children, noPadding = false }) {
   return (
     <div className="flex h-screen bg-background overflow-hidden font-sans">
       
-      {/* --- SIDEBAR (Solo visible en /plans/:id) --- */}
+      {/* --- SIDEBAR --- */}
       {showSidebar && (
         <aside
           className={cn(
@@ -67,8 +66,11 @@ export default function AppLayout({ children, noPadding = false }) {
             collapsed ? "w-16" : "w-64"
           )}
         >
-          {/* Logo */}
-          <div className="flex items-center h-16 px-4 border-b border-slate-800/50">
+          {/* Logo con link a Home */}
+          <div 
+            className="flex items-center h-16 px-4 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800/50 transition-colors"
+            onClick={() => navigate("/")}
+          >
             <div className="flex items-center gap-3 overflow-hidden">
               <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[rgb(170,32,47)] flex items-center justify-center shadow-lg shadow-red-900/20">
                 <Building2 className="h-5 w-5 text-white" />
@@ -82,7 +84,6 @@ export default function AppLayout({ children, noPadding = false }) {
             </div>
           </div>
 
-          {/* Navigation */}
           <nav className="flex-1 py-6 px-2 space-y-1 overflow-y-auto">
             <TooltipProvider delayDuration={0}>
               {NAVIGATION.map((item) => {
@@ -118,7 +119,6 @@ export default function AppLayout({ children, noPadding = false }) {
             </TooltipProvider>
           </nav>
 
-          {/* Collapse Toggle */}
           <div className="p-3 border-t border-slate-800/50">
             <Button
               variant="ghost"
@@ -138,12 +138,13 @@ export default function AppLayout({ children, noPadding = false }) {
 
       {/* --- MAIN AREA --- */}
       <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 relative">
-        {/* Header */}
         <header className="flex items-center justify-between h-16 px-6 bg-white border-b border-slate-200 shadow-sm sticky top-0 z-10">
           <div className="flex items-center gap-2">
-             {/* Si no hay sidebar (ej: Home o Projects), mostramos el nombre de la app aquí */}
              {!showSidebar && (
-               <div className="flex items-center gap-2">
+               <div 
+                 className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+                 onClick={() => navigate("/")}
+               >
                  <div className="w-8 h-8 rounded-lg bg-[rgb(170,32,47)] flex items-center justify-center">
                     <Building2 className="h-5 w-5 text-white" />
                  </div>
@@ -153,7 +154,6 @@ export default function AppLayout({ children, noPadding = false }) {
           </div>
 
           <div className="flex items-center gap-4">
-            
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="relative h-9 w-9 rounded-full ring-2 ring-white hover:ring-slate-100 transition-all p-0 focus-visible:ring-0">
@@ -167,15 +167,11 @@ export default function AppLayout({ children, noPadding = false }) {
               <DropdownMenuContent className="w-56" align="end" forceMount>
                 <DropdownMenuLabel className="font-normal">
                   <div className="flex flex-col space-y-1">
-                    {/* Cambio 1: Texto cambiado a Usuario */}
                     <p className="text-sm font-medium leading-none">Usuario</p>
                     <p className="text-xs leading-none text-muted-foreground truncate">{userEmail}</p>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                
-                {/* Cambio 2: Eliminado el botón de Perfil */}
-                
                 <DropdownMenuItem onClick={handleLogout} className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer">
                   <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                 </DropdownMenuItem>
@@ -184,7 +180,6 @@ export default function AppLayout({ children, noPadding = false }) {
           </div>
         </header>
 
-        {/* Content */}
         <main className={cn("flex-1 overflow-auto", noPadding ? "" : "")}>
           {children}
         </main>

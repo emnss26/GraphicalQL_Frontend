@@ -89,7 +89,6 @@ const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCas
 
 const ProgressBar = ({ pct }) => {
   let info = { color: "bg-gray-300", label: "Pendiente", textColor: "text-gray-500" };
-  
   if (pct >= 100) info = { color: "bg-green-600", label: "Completado", textColor: "text-green-700" };
   else if (pct >= 66) info = { color: "bg-blue-600", label: "En revisión", textColor: "text-blue-700" };
   else if (pct >= 33) info = { color: "bg-yellow-500", label: "Generado", textColor: "text-yellow-700" };
@@ -154,7 +153,6 @@ const DateCell = ({ value, editable, onChange, onBlur }) => {
           onBlur={onBlur}
           className="h-7 text-xs cursor-pointer px-1 pr-6 w-full"
         />
-        {/* Icono decorativo */}
         <Calendar className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none opacity-50" />
       </div>
     );
@@ -194,7 +192,6 @@ const SortableHeader = ({ children, tooltip, icon: Icon, sortable, sortDirection
 };
 
 const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
-  // Agrupar columnas
   const groups = useMemo(() => {
     const g = {};
     columns.forEach(col => {
@@ -225,37 +222,51 @@ const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
                 <span className="text-xs font-bold text-muted-foreground uppercase">{COLUMN_GROUPS[groupKey]?.label}</span>
               </div>
               {cols.map(col => (
-                <div key={col.id} className="flex items-center gap-2 px-2 py-1 hover:bg-accent rounded cursor-pointer" onClick={() => onToggle(col.id)}>
-                  <Checkbox checked={visibleColumns.has(col.id)} id={`col-${col.id}`} onCheckedChange={() => onToggle(col.id)} />
+                <div 
+                    key={col.id} 
+                    className="flex items-center gap-2 px-2 py-1.5 hover:bg-accent rounded cursor-pointer select-none" 
+                    // Eliminamos el onClick del div para que no interfiera con el Checkbox
+                >
+                  <Checkbox 
+                    checked={visibleColumns.has(col.id)} 
+                    id={`col-${col.id}`} 
+                    onCheckedChange={() => onToggle(col.id)} 
+                  />
                   <label htmlFor={`col-${col.id}`} className="text-sm cursor-pointer flex-1">{col.label}</label>
+                  {visibleColumns.has(col.id) ? (
+                    <Eye className="h-3 w-3 text-muted-foreground ml-auto" />
+                  ) : (
+                    <EyeOff className="h-3 w-3 text-muted-foreground/50 ml-auto" />
+                  )}
                 </div>
               ))}
             </div>
           ))}
+        </div>
+        <div className="p-2 border-t bg-muted/20 flex justify-between">
+            <Button variant="ghost" size="sm" className="text-xs h-7 px-2" onClick={() => columns.forEach(c => !visibleColumns.has(c.id) && onToggle(c.id))}>
+                Mostrar Todo
+            </Button>
         </div>
       </PopoverContent>
     </Popover>
   );
 };
 
-/* --- COMPONENTE PRINCIPAL --- */
 export default function SheetsTable({
   data = [],
   onEdit = () => {},
   onDeleteRow = () => {},
 }) {
-  // Estados para filtro, orden y visibilidad
   const [rows, setRows] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState({ field: "", direction: null });
-  // Inicialmente todas visibles
   const [visibleColumns, setVisibleColumns] = useState(new Set(COLUMN_DEFINITIONS.map(c => c.id)));
 
   const DATE_FIELDS = useMemo(() => [
     "plannedGenDate", "actualGenDate", "plannedReviewDate", "actualReviewDate", "plannedIssueDate", "actualIssueDate",
   ], []);
 
-  // Normalización de datos (tu lógica existente + mapeo seguro)
   const normalizeRow = (sheet) => ({
     id: sheet.id ?? sheet.plan_id ?? null,
     name: sheet.name ?? sheet.sheet_name ?? "",
@@ -282,11 +293,8 @@ export default function SheetsTable({
     setRows(Array.isArray(data) ? data.map(normalizeRow) : []);
   }, [data]);
 
-  // --- Lógica de Procesamiento (Search + Sort) ---
   const processedRows = useMemo(() => {
     let result = [...rows];
-
-    // 1. Filtrado
     if (searchTerm) {
       const lower = searchTerm.toLowerCase();
       result = result.filter(r => 
@@ -295,26 +303,17 @@ export default function SheetsTable({
         r.issueVersionSetName.toLowerCase().includes(lower)
       );
     }
-
-    // 2. Ordenamiento
     if (sortConfig.field && sortConfig.direction) {
       result.sort((a, b) => {
         const valA = a[sortConfig.field] || "";
         const valB = b[sortConfig.field] || "";
-        
-        // Comparación simple de strings (funciona bien para fechas ISO y textos)
-        // Para fechas DD/MM/YYYY, idealmente convertir a ISO antes de comparar, 
-        // pero por simplicidad comparamos strings. Si necesitas orden estricto de fechas DD/MM, avísame.
         if (valA < valB) return sortConfig.direction === "asc" ? -1 : 1;
         if (valA > valB) return sortConfig.direction === "asc" ? 1 : -1;
         return 0;
       });
     }
-
     return result;
   }, [rows, searchTerm, sortConfig]);
-
-  // --- Manejadores ---
 
   const handleSort = (field) => {
     setSortConfig(prev => {
@@ -324,25 +323,22 @@ export default function SheetsTable({
     });
   };
 
-  const toggleColumn = (id) => {
+  // --- CORRECCIÓN EN TOGGLE COLUMN ---
+  // Nos aseguramos de crear un nuevo Set para forzar el re-render
+  const toggleColumn = useCallback((id) => {
     setVisibleColumns(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
 
-  // Función crítica: Encuentra el índice REAL en 'data' original basado en el objeto fila
-  const getOriginalIndex = (rowObject) => {
-    return rows.indexOf(rowObject);
-  };
+  const getOriginalIndex = (rowObject) => rows.indexOf(rowObject);
 
-  // Actualiza estado visual
   const handleChange = (rowObject, field, value) => {
     const idx = getOriginalIndex(rowObject);
     if (idx === -1) return;
-
     setRows(prev => {
       const clone = [...prev];
       clone[idx] = { ...clone[idx], [field]: value };
@@ -350,11 +346,9 @@ export default function SheetsTable({
     });
   };
 
-  // Guarda en BD (usa el índice original para que funcione onEdit)
   const handleBlur = (rowObject, field, value) => {
     const idx = getOriginalIndex(rowObject);
     if (idx === -1) return;
-
     if (DATE_FIELDS.includes(field)) {
       const iso = dmyToISO(value) || null;
       onEdit(idx, field, iso);
@@ -363,7 +357,6 @@ export default function SheetsTable({
     }
   };
 
-  // Input Date Handler
   const handleDateInput = (rowObject, field, dateValueYYYYMMDD) => {
     if (!dateValueYYYYMMDD) {
       handleChange(rowObject, field, "");
@@ -383,10 +376,9 @@ export default function SheetsTable({
 
   const isVisible = (id) => visibleColumns.has(id);
 
-  // --- RENDER ---
   return (
     <div className="space-y-4">
-      {/* BARRA DE HERRAMIENTAS (Search & Filter) */}
+      {/* TOOLBAR */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between bg-card p-2 rounded-lg border">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -403,7 +395,12 @@ export default function SheetsTable({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <ColumnVisibilitySelector columns={COLUMN_DEFINITIONS} visibleColumns={visibleColumns} onToggle={toggleColumn} />
+          {/* PASAMOS toggleColumn COMO PROP */}
+          <ColumnVisibilitySelector 
+            columns={COLUMN_DEFINITIONS} 
+            visibleColumns={visibleColumns} 
+            onToggle={toggleColumn} 
+          />
           {searchTerm && (
             <Badge variant="secondary" className="h-9 px-3">
               <Filter className="h-3 w-3 mr-1" /> {processedRows.length} resultados
@@ -412,20 +409,17 @@ export default function SheetsTable({
         </div>
       </div>
 
-      {/* TABLA PRINCIPAL */}
+      {/* TABLA */}
       <div className="rounded-md border bg-card overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <Table className="w-full text-xs">
             <TableHeader>
-              {/* Fila de Grupos */}
               <TableRow className="bg-muted/50 border-b border-border hover:bg-muted/50">
                 {isVisible("index") && <TableHead className="py-1" />}
-                {/* Lógica para colSpans dinámicos por grupo */}
                 {Object.keys(COLUMN_GROUPS).map(groupKey => {
                    const groupCols = COLUMN_DEFINITIONS.filter(c => c.group === groupKey && isVisible(c.id));
                    if (groupCols.length === 0) return null;
                    const style = groupKey === "generation" || groupKey === "issue" ? "bg-blue-50 text-blue-700 border-b-blue-200" : "bg-zinc-50 text-zinc-700 border-b-zinc-200";
-                   
                    return (
                      <TableHead key={groupKey} colSpan={groupCols.length} className={`text-center py-2 text-[10px] font-bold uppercase tracking-wider border-l border-r border-white ${style}`}>
                        {COLUMN_GROUPS[groupKey].label}
@@ -433,15 +427,11 @@ export default function SheetsTable({
                    );
                 })}
               </TableRow>
-
-              {/* Fila de Columnas */}
               <TableRow className="bg-background border-b-2 border-border hover:bg-background">
                 {COLUMN_DEFINITIONS.map((col) => {
                   if (!isVisible(col.id)) return null;
-                  
                   let cellClass = "h-10 px-3 py-2 border-r last:border-r-0 border-border/50";
                   if (col.group === "generation" || col.group === "issue") cellClass += " bg-blue-50/30";
-
                   return (
                     <TableHead key={col.id} className={`${col.width} ${cellClass}`}>
                       <SortableHeader
@@ -458,7 +448,6 @@ export default function SheetsTable({
                 })}
               </TableRow>
             </TableHeader>
-
             <TableBody>
               {processedRows.length === 0 ? (
                 <TableRow>
@@ -471,91 +460,31 @@ export default function SheetsTable({
                 </TableRow>
               ) : (
                 processedRows.map((r) => {
-                  // Obtenemos el índice REAL para las funciones de borrado
                   const realIndex = getOriginalIndex(r); 
                   const progress = getProgress(r);
                   const isComplete = progress === 100;
-
                   return (
                     <TableRow key={r.id || `temp-${Math.random()}`} className={`group hover:bg-muted/50 transition-colors ${isComplete ? "bg-green-50/40 hover:bg-green-50/60" : ""}`}>
-                      
-                      {isVisible("index") && (
-                        <TableCell className="text-center font-mono text-muted-foreground bg-muted/20 border-r">{realIndex + 1}</TableCell>
-                      )}
-
-                      {/* --- BASIC --- */}
-                      {isVisible("number") && (
-                        <TableCell className="p-1 border-r">
-                          <Input 
-                            value={r.number} 
-                            onChange={(e) => handleChange(r, "number", e.target.value)} 
-                            onBlur={(e) => handleBlur(r, "number", e.target.value)} 
-                            className="h-7 text-xs border-transparent focus:border-primary bg-transparent font-medium" 
-                          />
-                        </TableCell>
-                      )}
-                      {isVisible("name") && (
-                        <TableCell className="p-1 border-r">
-                          <Input 
-                            value={r.name} 
-                            onChange={(e) => handleChange(r, "name", e.target.value)} 
-                            onBlur={(e) => handleBlur(r, "name", e.target.value)} 
-                            className="h-7 text-xs border-transparent focus:border-primary bg-transparent" 
-                          />
-                        </TableCell>
-                      )}
+                      {isVisible("index") && <TableCell className="text-center font-mono text-muted-foreground bg-muted/20 border-r">{realIndex + 1}</TableCell>}
+                      {isVisible("number") && <TableCell className="p-1 border-r"><Input value={r.number} onChange={(e) => handleChange(r, "number", e.target.value)} onBlur={(e) => handleBlur(r, "number", e.target.value)} className="h-7 text-xs border-transparent focus:border-primary bg-transparent font-medium" /></TableCell>}
+                      {isVisible("name") && <TableCell className="p-1 border-r"><Input value={r.name} onChange={(e) => handleChange(r, "name", e.target.value)} onBlur={(e) => handleBlur(r, "name", e.target.value)} className="h-7 text-xs border-transparent focus:border-primary bg-transparent" /></TableCell>}
                       {isVisible("currentRevision") && <TableCell className="text-center border-r"><Badge variant="outline" className="bg-white">{r.currentRevision}</Badge></TableCell>}
                       {isVisible("currentRevisionDate") && <TableCell className="border-r text-muted-foreground">{r.currentRevisionDate}</TableCell>}
-
-                      {/* --- GENERATION --- */}
-                      {isVisible("plannedGenDate") && (
-                        <TableCell className="p-1 border-r bg-blue-50/10">
-                          <DateCell editable value={r.plannedGenDate} onChange={(v) => handleDateInput(r, "plannedGenDate", v)} onBlur={() => handleBlur(r, "plannedGenDate", r.plannedGenDate)} />
-                        </TableCell>
-                      )}
+                      {isVisible("plannedGenDate") && <TableCell className="p-1 border-r bg-blue-50/10"><DateCell editable value={r.plannedGenDate} onChange={(v) => handleDateInput(r, "plannedGenDate", v)} onBlur={() => handleBlur(r, "plannedGenDate", r.plannedGenDate)} /></TableCell>}
                       {isVisible("actualGenDate") && <TableCell className="border-r bg-blue-50/20"><DateCell value={r.actualGenDate} /></TableCell>}
                       {isVisible("docsVersion") && <TableCell className="text-center border-r bg-blue-50/20 font-mono">{r.docsVersion}</TableCell>}
                       {isVisible("docsVersionDate") && <TableCell className="border-r bg-blue-50/20"><DateCell value={r.docsVersionDate} /></TableCell>}
-
-                      {/* --- REVIEW --- */}
-                      {isVisible("plannedReviewDate") && (
-                        <TableCell className="p-1 border-r">
-                          <DateCell editable value={r.plannedReviewDate} onChange={(v) => handleDateInput(r, "plannedReviewDate", v)} onBlur={() => handleBlur(r, "plannedReviewDate", r.plannedReviewDate)} />
-                        </TableCell>
-                      )}
-                      {isVisible("hasApprovalFlow") && (
-                        <TableCell className="text-center border-r">
-                          {r.hasApprovalFlow ? <Check className="h-4 w-4 text-emerald-500 mx-auto" /> : <div className="h-1.5 w-1.5 rounded-full bg-gray-200 mx-auto" />}
-                        </TableCell>
-                      )}
+                      {isVisible("plannedReviewDate") && <TableCell className="p-1 border-r"><DateCell editable value={r.plannedReviewDate} onChange={(v) => handleDateInput(r, "plannedReviewDate", v)} onBlur={() => handleBlur(r, "plannedReviewDate", r.plannedReviewDate)} /></TableCell>}
+                      {isVisible("hasApprovalFlow") && <TableCell className="text-center border-r">{r.hasApprovalFlow ? <Check className="h-4 w-4 text-emerald-500 mx-auto" /> : <div className="h-1.5 w-1.5 rounded-full bg-gray-200 mx-auto" />}</TableCell>}
                       {isVisible("actualReviewDate") && <TableCell className="border-r"><DateCell value={r.actualReviewDate} /></TableCell>}
                       {isVisible("lastReviewDate") && <TableCell className="border-r"><DateCell value={r.lastReviewDate} /></TableCell>}
                       {isVisible("lastReviewStatus") && <TableCell className="border-r"><StatusBadge status={r.lastReviewStatus} /></TableCell>}
-
-                      {/* --- ISSUE --- */}
-                      {isVisible("plannedIssueDate") && (
-                        <TableCell className="p-1 border-r bg-blue-50/10">
-                          <DateCell editable value={r.plannedIssueDate} onChange={(v) => handleDateInput(r, "plannedIssueDate", v)} onBlur={() => handleBlur(r, "plannedIssueDate", r.plannedIssueDate)} />
-                        </TableCell>
-                      )}
+                      {isVisible("plannedIssueDate") && <TableCell className="p-1 border-r bg-blue-50/10"><DateCell editable value={r.plannedIssueDate} onChange={(v) => handleDateInput(r, "plannedIssueDate", v)} onBlur={() => handleBlur(r, "plannedIssueDate", r.plannedIssueDate)} /></TableCell>}
                       {isVisible("actualIssueDate") && <TableCell className="border-r bg-blue-50/20"><DateCell value={r.actualIssueDate} /></TableCell>}
                       {isVisible("issueUpdatedAt") && <TableCell className="border-r bg-blue-50/20"><DateCell value={r.issueUpdatedAt} /></TableCell>}
                       {isVisible("issueVersionSetName") && <TableCell className="border-r bg-blue-50/20 text-muted-foreground">{r.issueVersionSetName}</TableCell>}
-
-                      {/* --- STATUS --- */}
-                      {isVisible("progress") && (
-                        <TableCell className="px-2 border-r bg-gray-50/30">
-                          <ProgressBar pct={progress} />
-                        </TableCell>
-                      )}
-                      {isVisible("actions") && (
-                        <TableCell className="text-center bg-gray-50/30">
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={() => onDeleteRow(realIndex)}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </TableCell>
-                      )}
-
+                      {isVisible("progress") && <TableCell className="px-2 border-r bg-gray-50/30"><ProgressBar pct={progress} /></TableCell>}
+                      {isVisible("actions") && <TableCell className="text-center bg-gray-50/30"><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={() => onDeleteRow(realIndex)}><Trash2 className="h-3.5 w-3.5" /></Button></TableCell>}
                     </TableRow>
                   );
                 })
@@ -564,8 +493,6 @@ export default function SheetsTable({
           </Table>
         </div>
       </div>
-      
-      {/* FOOTER INFO */}
       <div className="flex justify-between items-center text-xs text-muted-foreground px-1">
         <div>Mostrando {processedRows.length} de {rows.length} registros</div>
         <div className="flex gap-4">

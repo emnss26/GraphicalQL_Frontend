@@ -18,13 +18,15 @@ import {
 import {
   Boxes, FolderOpen, FileUp, FileDown, Plus, RefreshCw, 
   LayoutGrid, CheckCircle2, Clock, AlertCircle, TrendingUp, 
-  ChevronDown, Sparkles, Zap, Trash2
+  ChevronDown, Sparkles, Zap, Table2, BarChart3
 } from "lucide-react";
 
 import AppLayout from "@/components/general_component/AppLayout";
 import SheetsTable from "@/components/aec_model_components/SheetsTable";
+import AnalyticsDashboard from "@/components/general_component/AnalyticsDashboard"; // <--- IMPORTA EL NUEVO DASHBOARD
 import SelectModelsModal from "../../components/aec_model_components/SelectModelModal";
 import SelectFolderModal from "../../components/aec_model_components/SelectFolderModal";
+import AbitatLogoLoader from "@/components/general_component/AbitatLogoLoader"; 
 
 const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 
@@ -50,6 +52,9 @@ export default function AECModelPlansPage() {
   const altProjectId = sessionStorage.getItem("altProjectId");
   const projectName = sessionStorage.getItem("projectName");
 
+  // --- ESTADO PARA CONTROLAR LA VISTA (TABLA vs DASHBOARD) ---
+  const [viewMode, setViewMode] = useState("table"); 
+
   const [models, setModels] = useState([]);
   const [selectedModelsIds, setSelectedModelsIds] = useState([]);
   const [folderTree, setFolderTree] = useState([]);
@@ -59,11 +64,10 @@ export default function AECModelPlansPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [error, setError] = useState("");
-  const [isSyncing, setIsSyncing] = useState(false); // Estado visual para el sync
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isLoadingInitial, setIsLoadingInitial] = useState(true);
 
   const fileInputRef = useRef(null);
-
-  // helpers URL / JSON seguros
   const apiBase = (backendUrl || "").replace(/\/$/, "");
   const pId = encodeURIComponent(projectId || "");
 
@@ -76,7 +80,7 @@ export default function AECModelPlansPage() {
     return res.json();
   };
 
-  /* ... (TUS HELPERS DE FECHAS SE MANTIENEN IGUAL) ... */
+  /* ... TUS HELPERS DE FECHAS SE MANTIENEN IGUALES ... */
   const norm = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
   const excelSerialToISO = (n) => {
     if (typeof n !== "number" || !isFinite(n)) return "";
@@ -121,12 +125,9 @@ export default function AECModelPlansPage() {
   const isRevProg = (h) => ["rev. técnica (programada)", "revisión técnica (programada)", "revision tecnica (programada)", "planned review date"].includes(norm(h));
   const isEmiProg = (h) => ["emisión (programada)", "emision (programada)", "emisión a construcción (programada)", "planned issue date"].includes(norm(h));
 
-  // --- CÁLCULO DE ESTADÍSTICAS (Nuevo) ---
   const stats = useMemo(() => {
     const total = plans.length;
-    // Consideramos completado si tiene fecha real de emisión
     const completed = plans.filter((d) => d.actualIssueDate || d.actual_issue_date).length;
-    // En revisión si tiene fecha real de revisión pero no emisión
     const inReview = plans.filter((d) => 
         (d.actualReviewDate || d.actual_review_date) && 
         !(d.actualIssueDate || d.actual_issue_date)
@@ -137,7 +138,7 @@ export default function AECModelPlansPage() {
     return { total, completed, inReview, pending, completionRate };
   }, [plans]);
 
-  // --- EFECTOS Y HANDLERS (Lógica original intacta) ---
+  // --- EFECTOS DE CARGA ---
   useEffect(() => {
     (async () => {
       try {
@@ -191,7 +192,14 @@ export default function AECModelPlansPage() {
     }
   };
 
-  useEffect(() => { loadPlans(); }, [apiBase, pId]);
+  useEffect(() => {
+    const init = async () => {
+        setIsLoadingInitial(true);
+        await loadPlans();
+        setIsLoadingInitial(false);
+    };
+    init();
+  }, [apiBase, pId]);
 
   const handleAddRow = () => setPlans((prev) => [...prev, emptyPlan()]);
 
@@ -219,7 +227,6 @@ export default function AECModelPlansPage() {
       const rows = utils.sheet_to_json(ws, { header: 1, raw: false });
       if (!rows.length) throw new Error("El archivo está vacío.");
       
-      // (Tu lógica de mapeo de headers se mantiene)
       const headers = rows[0];
       let idxNombre = -1, idxNumero = -1, idxGen = -1, idxRev = -1, idxEmi = -1;
       headers.forEach((h, i) => {
@@ -262,13 +269,22 @@ export default function AECModelPlansPage() {
   };
 
   const handleExportExcel = () => {
-    const exportData = (plans || []).map((r) => ({
+    // Usamos 'plans' directamente, que contiene TODOS los registros cargados
+    const exportData = plans.map((r) => ({
       "Nombre de plano": r.name || "",
       "Número de plano": r.number || "",
+      "Revisión Actual": r.currentRevision || "",
+      "Fecha Rev. Actual": isoToDMY(r.currentRevisionDate || r.current_revision_date || ""),
       "Fecha gen. (programada)": isoToDMY(r.plannedGenDate || r.planned_gen_date || ""),
+      "Fecha gen. (real)": isoToDMY(r.actualGenDate || r.actual_gen_date || ""),
       "Rev. técnica (programada)": isoToDMY(r.plannedReviewDate || r.planned_review_date || ""),
+      "Rev. técnica (real)": isoToDMY(r.actualReviewDate || r.actual_review_date || ""),
       "Emisión (programada)": isoToDMY(r.plannedIssueDate || r.planned_issue_date || ""),
+      "Emisión (real)": isoToDMY(r.actualIssueDate || r.actual_issue_date || ""),
+      "Conjunto": r.issueVersionSetName || r.sheet_version_set || "",
+      "Estado": r.status || ""
     }));
+
     const ws = utils.json_to_sheet(exportData);
     const wb = utils.book_new();
     utils.book_append_sheet(wb, ws, "Planos");
@@ -353,18 +369,30 @@ export default function AECModelPlansPage() {
 
   const hasPersistedRows = Array.isArray(plans) && plans.some((p) => p.id);
 
+  if (isLoadingInitial || isSyncing) {
+    return (
+        <AppLayout>
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm z-50 animate-in fade-in duration-300">
+                <AbitatLogoLoader className="scale-100" />
+                <p className="mt-6 text-base text-gray-500 font-medium animate-pulse">
+                    {isSyncing ? "Sincronizando datos con Autodesk..." : "Cargando planes..."}
+                </p>
+            </div>
+        </AppLayout>
+    );
+  }
+
   return (
     <AppLayout>
       <div className="max-w-[1800px] mx-auto p-6 space-y-6">
         
-        {/* --- HEADER ESTILO VERCEL --- */}
+        {/* --- HEADER --- */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border pb-6">
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-foreground tracking-tight">Project Sheets</h1>
               <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 gap-1 rounded-full px-2">
-                <Sparkles className="h-3 w-3" />
-                V2.0
+                <Sparkles className="h-3 w-3" /> V2.0
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
@@ -372,143 +400,131 @@ export default function AECModelPlansPage() {
             </p>
           </div>
 
-          {/* Quick Stats Pills */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 text-xs font-medium border border-emerald-500/20">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              {stats.completed} Completados
-            </div>
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/10 text-blue-600 text-xs font-medium border border-blue-500/20">
-              <Clock className="h-3.5 w-3.5" />
-              {stats.inReview} En revisión
-            </div>
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-500/10 text-zinc-600 text-xs font-medium border border-zinc-500/20">
-              <AlertCircle className="h-3.5 w-3.5" />
-              {stats.pending} Pendientes
-            </div>
-          </div>
-        </div>
-
-        {/* --- STATS CARDS --- */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="bg-card border-border shadow-sm hover:shadow-md transition-all">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total Planos</p>
-                  <p className="text-2xl font-bold text-foreground mt-1">{stats.total}</p>
-                </div>
-                <div className="h-10 w-10 rounded-lg bg-zinc-100 flex items-center justify-center">
-                  <LayoutGrid className="h-5 w-5 text-zinc-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-card border-border shadow-sm hover:shadow-md transition-all">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Progreso Global</p>
-                  <p className="text-2xl font-bold text-emerald-600 mt-1">{stats.completionRate}%</p>
-                </div>
-                <div className="h-10 w-10 rounded-lg bg-emerald-50 flex items-center justify-center">
-                  <TrendingUp className="h-5 w-5 text-emerald-600" />
-                </div>
-              </div>
-              <div className="mt-3 h-1.5 w-full bg-zinc-100 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${stats.completionRate}%` }} />
-              </div>
-            </CardContent>
-          </Card>
-          
-          {/* Espaciadores para completar el grid si quieres más cards o dejarlo así */}
-        </div>
-
-        {/* --- ACTION TOOLBAR --- */}
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/30 p-3 rounded-xl border border-border">
-          
-          <div className="flex items-center gap-2">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-2 bg-background shadow-sm hover:bg-zinc-50" onClick={() => setModalOpen(true)}>
-                    <Boxes className="h-4 w-4 text-zinc-500" />
-                    <span className="hidden sm:inline">Modelos</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Seleccionar modelos BIM</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-2 bg-background shadow-sm hover:bg-zinc-50" onClick={() => setFolderModalOpen(true)}>
-                    <FolderOpen className="h-4 w-4 text-zinc-500" />
-                    <span className="hidden sm:inline">Folder</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Seleccionar carpeta de publicación</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+          {/* TOGGLE VISTA Y PILLS */}
+          <div className="flex items-center gap-4">
             
-            <div className="h-6 w-px bg-border mx-1 hidden sm:block" />
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-2 hover:bg-background">
-                  <FileUp className="h-4 w-4 text-zinc-500" />
-                  <span className="hidden sm:inline">Importar</span>
-                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            {/* TOGGLE BUTTONS */}
+            <div className="flex items-center bg-muted/50 rounded-lg p-1 border border-border">
+                <Button
+                    variant={viewMode === "table" ? "default" : "ghost"}
+                    size="sm"
+                    className={`gap-2 h-8 text-xs ${viewMode === "table" ? "bg-white text-black shadow-sm" : "hover:bg-transparent text-muted-foreground"}`}
+                    onClick={() => setViewMode("table")}
+                >
+                    <Table2 className="h-3.5 w-3.5" />
+                    Tabla
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem onClick={handleClickImport}>
-                  <FileUp className="h-4 w-4 mr-2" /> Excel (.xlsx)
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                <Button
+                    variant={viewMode === "dashboard" ? "default" : "ghost"}
+                    size="sm"
+                    className={`gap-2 h-8 text-xs ${viewMode === "dashboard" ? "bg-white text-black shadow-sm" : "hover:bg-transparent text-muted-foreground"}`}
+                    onClick={() => setViewMode("dashboard")}
+                >
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Dashboard
+                </Button>
+            </div>
 
-            <Button variant="ghost" size="sm" className="gap-2 hover:bg-background" onClick={handleExportExcel}>
-              <FileDown className="h-4 w-4 text-emerald-600" />
-              <span className="hidden sm:inline">Exportar</span>
-            </Button>
+            <div className="hidden lg:flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 text-xs font-medium border border-emerald-500/20">
+                <CheckCircle2 className="h-3.5 w-3.5" /> {stats.completed} Completados
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/10 text-blue-600 text-xs font-medium border border-blue-500/20">
+                <Clock className="h-3.5 w-3.5" /> {stats.inReview} En revisión
+                </div>
+            </div>
           </div>
-
-          <div className="flex items-center gap-2 ml-auto">
-             <Button variant="secondary" size="sm" className="gap-2 text-xs h-9" onClick={handleAddRow}>
-               <Plus className="h-3.5 w-3.5" /> Fila
-             </Button>
-             
-             {!hasPersistedRows && (
-               <Button variant="outline" size="sm" className="text-xs h-9" onClick={handleSaveList}>
-                 Guardar Todo
-               </Button>
-             )}
-
-             <Button 
-               size="sm" 
-               className="gap-2 bg-[rgb(170,32,47)] hover:bg-[rgb(150,28,42)] text-white shadow-sm h-9 text-xs disabled:opacity-70 transition-all"
-               onClick={handleSyncMatch}
-               disabled={!selectedModelsIds.length || !selectedFolderId || !altProjectId || isSyncing}
-             >
-               {isSyncing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-               Sincronizar
-             </Button>
-          </div>
-
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
         </div>
 
-        {error && (
-          <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm font-medium border border-red-100 flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" /> {error}
-          </div>
+        {/* --- CONTENIDO CONDICIONAL --- */}
+        {viewMode === "table" ? (
+            <>
+                {/* ACTION TOOLBAR (Solo visible en modo Tabla) */}
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/30 p-3 rounded-xl border border-border">
+                    <div className="flex items-center gap-2">
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button variant="outline" size="sm" className="gap-2 bg-background shadow-sm hover:bg-zinc-50" onClick={() => setModalOpen(true)}>
+                                        <Boxes className="h-4 w-4 text-zinc-500" />
+                                        <span className="hidden sm:inline">Modelos</span>
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Seleccionar modelos BIM</TooltipContent>
+                            </Tooltip>
+
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button variant="outline" size="sm" className="gap-2 bg-background shadow-sm hover:bg-zinc-50" onClick={() => setFolderModalOpen(true)}>
+                                        <FolderOpen className="h-4 w-4 text-zinc-500" />
+                                        <span className="hidden sm:inline">Folder</span>
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Seleccionar carpeta de publicación</TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                        
+                        <div className="h-6 w-px bg-border mx-1 hidden sm:block" />
+
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="gap-2 hover:bg-background">
+                                    <FileUp className="h-4 w-4 text-zinc-500" />
+                                    <span className="hidden sm:inline">Importar</span>
+                                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                                <DropdownMenuItem onClick={handleClickImport}>
+                                    <FileUp className="h-4 w-4 mr-2" /> Excel (.xlsx)
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <Button variant="ghost" size="sm" className="gap-2 hover:bg-background" onClick={handleExportExcel}>
+                            <FileDown className="h-4 w-4 text-emerald-600" />
+                            <span className="hidden sm:inline">Exportar</span>
+                        </Button>
+                    </div>
+
+                    <div className="flex items-center gap-2 ml-auto">
+                        <Button variant="secondary" size="sm" className="gap-2 text-xs h-9" onClick={handleAddRow}>
+                            <Plus className="h-3.5 w-3.5" /> Fila
+                        </Button>
+                        
+                        {!hasPersistedRows && (
+                            <Button variant="outline" size="sm" className="text-xs h-9" onClick={handleSaveList}>
+                                Guardar Todo
+                            </Button>
+                        )}
+
+                        <Button 
+                            size="sm" 
+                            className="gap-2 bg-[rgb(170,32,47)] hover:bg-[rgb(150,28,42)] text-white shadow-sm h-9 text-xs disabled:opacity-70 transition-all"
+                            onClick={handleSyncMatch}
+                            disabled={!selectedModelsIds.length || !selectedFolderId || !altProjectId || isSyncing}
+                        >
+                            <Zap className="h-3.5 w-3.5" /> Sincronizar
+                        </Button>
+                    </div>
+                    <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
+                </div>
+
+                {error && (
+                    <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm font-medium border border-red-100 flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4" /> {error}
+                    </div>
+                )}
+
+                {/* TABLA */}
+                <SheetsTable data={plans} onEdit={handleEdit} onDeleteRow={handleDeleteRow} />
+            </>
+        ) : (
+            // VISTA DASHBOARD
+            <AnalyticsDashboard data={plans} />
         )}
 
-        {/* --- TABLA PRINCIPAL --- */}
-        <SheetsTable data={plans} onEdit={handleEdit} onDeleteRow={handleDeleteRow} />
-
-        {/* Modales (Ocultos) */}
+        {/* Modales */}
         <SelectModelsModal
           models={models}
           open={modalOpen}
