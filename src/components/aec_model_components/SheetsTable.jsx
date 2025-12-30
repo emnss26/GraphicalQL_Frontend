@@ -123,13 +123,14 @@ const StatusBadge = ({ status }) => {
   let variant = "outline";
   let className = "text-[10px]";
 
+  // Backend ahora manda: APPROVED, REJECTED, IN_REVIEW
   if (s === "APPROVED" || s === "APROBADO") {
     variant = "default";
     className += " bg-emerald-500 hover:bg-emerald-600 text-white";
   } else if (s === "REJECTED" || s === "RECHAZADO") {
-    variant = "destructive";
-  } else if (s.includes("REVIEW") || s.includes("REVISION")) {
-    variant = "default";
+    variant = "destructive"; // Rojo
+  } else if (s === "IN_REVIEW" || s.includes("REVIEW") || s.includes("REVISION")) {
+    variant = "secondary"; // Cambio sugerido: Azul o Amarillo para "En proceso"
     className += " bg-blue-500 hover:bg-blue-600 text-white";
   } else {
     className += " text-muted-foreground";
