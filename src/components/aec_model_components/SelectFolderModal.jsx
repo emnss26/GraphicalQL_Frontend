@@ -1,33 +1,42 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import React, { useEffect, useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, ChevronDown, Folder } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder } from "lucide-react";
 
-// Componente recursivo para el árbol de carpetas colapsable
 function TreeNode({ node, selectedId, setSelected, depth = 0 }) {
   const [open, setOpen] = useState(false);
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
 
   const handleExpand = (e) => {
-    e.stopPropagation();
-    setOpen((o) => !o);
+    e.stopPropagation(); // Prevent selecting the radio when toggling expand/collapse
+    setOpen((prev) => !prev);
   };
 
   return (
-    <div style={{ marginLeft: depth * 16, display: "flex", alignItems: "center" }}>
+    <div
+      style={{ marginLeft: depth * 16 }}
+      className="flex items-center"
+    >
       {hasChildren ? (
         <button
+          type="button"
+          tabIndex={-1}
           onClick={handleExpand}
           className="mr-1 flex items-center"
-          tabIndex={-1}
-          type="button"
         >
           {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </button>
       ) : (
-        <span style={{ width: 18, display: "inline-block" }} />
+        <span style={{ width: 18 }} className="inline-block" />
       )}
-      <label className="flex items-center gap-2 cursor-pointer py-0.5 w-full">
+
+      <label className="flex w-full cursor-pointer items-center gap-2 py-0.5">
         <input
           type="radio"
           checked={selectedId === node.id}
@@ -39,6 +48,7 @@ function TreeNode({ node, selectedId, setSelected, depth = 0 }) {
           {node.name}
         </span>
       </label>
+
       {open && hasChildren && (
         <div className="w-full">
           {node.children.map((child) => (
@@ -61,22 +71,27 @@ export default function SelectFolderModal({
   onClose,
   folderTree,
   onSave,
-  selectedFolderId
+  selectedFolderId,
 }) {
   const [selected, setSelected] = useState(selectedFolderId || null);
 
   useEffect(() => {
-    setSelected(selectedFolderId);
+    setSelected(selectedFolderId || null);
   }, [selectedFolderId]);
+
+  const handleSave = () => {
+    if (selected) onSave(selected);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-xl max-h-[75vh] overflow-y-auto">
+      <DialogContent className="max-h-[75vh] max-w-xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Selecciona el folder donde están los planos</DialogTitle>
+          <DialogTitle>Select the folder that contains the plans</DialogTitle>
         </DialogHeader>
-        <div className="border rounded p-2 bg-gray-50">
-          {folderTree?.length > 0 ? (
+
+        <div className="rounded border bg-gray-50 p-2">
+          {Array.isArray(folderTree) && folderTree.length > 0 ? (
             folderTree.map((node) => (
               <TreeNode
                 key={node.id}
@@ -86,17 +101,20 @@ export default function SelectFolderModal({
               />
             ))
           ) : (
-            <div className="p-6 text-gray-500">Cargando folders...</div>
+            <div className="p-6 text-gray-500">Loading folders...</div>
           )}
         </div>
+
         <DialogFooter>
-          <Button onClick={onClose} variant="secondary">Cancelar</Button>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
           <Button
             className="bg-[rgb(170,32,47)] text-white"
             disabled={!selected}
-            onClick={() => selected && onSave(selected)}
+            onClick={handleSave}
           >
-            Guardar selección
+            Save selection
           </Button>
         </DialogFooter>
       </DialogContent>

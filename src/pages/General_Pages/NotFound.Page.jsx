@@ -1,23 +1,22 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import React from "react";
+import { useNavigate } from "react-router-dom";
 
-const NotFoundPage = () => {
+export default function NotFoundPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-gray-100 text-center p-4">
-      <h1 className="text-6xl font-bold text-gray-800 mb-4">404</h1>
-      <p className="text-xl text-gray-600 mb-8">
+    <div className="flex h-screen flex-col items-center justify-center bg-gray-100 p-4 text-center">
+      <h1 className="mb-4 text-6xl font-bold text-gray-800">404</h1>
+      <p className="mb-8 text-xl text-gray-600">
         Ups, no pudimos encontrar la página que buscas.
       </p>
       <button
-        onClick={() => navigate('/')}
-        className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+        type="button"
+        onClick={() => navigate("/")}
+        className="rounded bg-blue-600 px-6 py-2 text-white transition hover:bg-blue-700"
       >
         Volver al Inicio
       </button>
     </div>
   );
-};
-
-export default NotFoundPage;
+}

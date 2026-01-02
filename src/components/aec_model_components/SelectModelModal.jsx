@@ -1,17 +1,20 @@
 import React, { useState } from "react";
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
 export default function SelectModelsModal({ models = [], open, onClose, onSave }) {
   const [selected, setSelected] = useState([]);
 
-
   const handleToggle = (modelId) => {
     setSelected((prev) =>
-      prev.includes(modelId)
-        ? prev.filter((id) => id !== modelId)
-        : [...prev, modelId]
+      prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId]
     );
   };
 
@@ -21,34 +24,48 @@ export default function SelectModelsModal({ models = [], open, onClose, onSave }
   };
 
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) onClose();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Selecciona los modelos a analizar</DialogTitle>
+          <DialogTitle>Select the models to analyze</DialogTitle>
         </DialogHeader>
-        <div className="max-h-80 overflow-y-auto space-y-2 py-4">
-          {models.length ? models.map((model) => (
-            <label key={model.id} className="flex items-center gap-3 cursor-pointer hover:bg-accent px-2 rounded py-1">
-              <Checkbox
-                checked={selected.includes(model.id)}
-                onCheckedChange={() => handleToggle(model.id)}
-                className="mr-2"
-                id={model.id}
-              />
-              <span className="font-medium">{model.name}</span>
-            </label>
-          )) : (
-            <span className="text-gray-500">No hay modelos para seleccionar.</span>
+
+        <div className="max-h-80 space-y-2 overflow-y-auto py-4">
+          {Array.isArray(models) && models.length > 0 ? (
+            models.map((model) => (
+              <label
+                key={model.id}
+                className="flex cursor-pointer items-center gap-3 rounded px-2 py-1 hover:bg-accent"
+              >
+                <Checkbox
+                  id={model.id}
+                  checked={selected.includes(model.id)}
+                  onCheckedChange={() => handleToggle(model.id)}
+                  className="mr-2"
+                />
+                <span className="font-medium">{model.name}</span>
+              </label>
+            ))
+          ) : (
+            <span className="text-gray-500">No models available to select.</span>
           )}
         </div>
+
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
           <Button
             className="bg-[rgb(170,32,47)] text-white"
             disabled={selected.length === 0}
             onClick={handleSave}
           >
-            Guardar selección
+            Save selection
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,13 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCookies } from "react-cookie";
-
-// Icons
 import { FolderOpen } from "lucide-react";
 
-// Components
 import AppLayout from "@/components/general_component/AppLayout";
-import AbitatLogoLoader from "@/components/general_component/AbitatLogoLoader"; 
+import AbitatLogoLoader from "@/components/general_component/AbitatLogoLoader";
 
 const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 
@@ -15,34 +12,34 @@ export default function AECProjectsPage() {
   const [projects, setProjects] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [cookies] = useCookies(["access_token"]); // Necesario para disparar el useEffect si cambia
+  useCookies(["access_token"]);
   const navigate = useNavigate();
 
   useEffect(() => {
     const fetchAccProjects = async () => {
       try {
         setLoading(true);
+
         const response = await fetch(`${backendUrl}/aec/graphql-projects`, {
           credentials: "include",
         });
 
-        // Validación de seguridad
         if (response.status === 401 || response.status === 403) {
-           navigate("/login");
-           return;
+          navigate("/login");
+          return;
         }
 
         const result = await response.json();
-        
+
         if (!result.success && result.error) {
-            throw new Error(result.error);
+          throw new Error(result.error);
         }
 
-        console.log("Fetched Projects:", result.data?.aecProjects);
         setProjects(result.data?.aecProjects || []);
+        setError("");
       } catch (err) {
-        setError("No se pudieron cargar los proyectos. Revisa tu conexión.");
         console.error(err);
+        setError("No se pudieron cargar los proyectos. Revisa tu conexión.");
       } finally {
         setLoading(false);
       }
@@ -53,86 +50,85 @@ export default function AECProjectsPage() {
 
   return (
     <AppLayout>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center min-h-[80vh] p-6">
-        
-        {/* Izquierda: Logo Estático */}
+      <div className="grid min-h-[80vh] grid-cols-1 items-center gap-8 p-6 lg:grid-cols-2">
         <div className="flex items-center justify-center animate-in fade-in duration-700 slide-in-from-left-10">
           <img
             src="/Abitat_img.png"
             alt="Abitat Construction Solutions"
-            className="max-h-[220px] w-auto object-contain drop-shadow-xl hover:scale-105 transition-transform duration-500"
+            className="max-h-[220px] w-auto object-contain drop-shadow-xl transition-transform duration-500 hover:scale-105"
           />
         </div>
 
-        {/* Derecha: Lista de proyectos o Loader */}
-        <div className="flex flex-col items-center justify-center w-full">
-          
-          <h2 className="text-2xl font-bold mb-6 text-gray-800 tracking-tight">
+        <div className="flex w-full flex-col items-center justify-center">
+          <h2 className="mb-6 text-2xl font-bold tracking-tight text-gray-800">
             Lista de Proyectos
           </h2>
 
-          <div 
-            // CAMBIO: max-w-2xl para hacer la lista más ancha
-            className="w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-gray-100 p-1 min-h-[400px] flex flex-col relative overflow-hidden"
-          >
-            {/* --- LOADER --- */}
+          <div className="relative flex min-h-[400px] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-1 shadow-xl">
             {loading ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm z-10 animate-in fade-in duration-300">
-                    <AbitatLogoLoader className="scale-75" />
-                    <p className="mt-4 text-sm text-gray-500 font-medium animate-pulse">Cargando...</p>
-                </div>
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm animate-in fade-in duration-300">
+                <AbitatLogoLoader className="scale-75" />
+                <p className="mt-4 animate-pulse text-sm font-medium text-gray-500">
+                  Cargando...
+                </p>
+              </div>
             ) : null}
 
-            {/* --- ERROR --- */}
-            {error && !loading && (
-                <div className="p-6 flex flex-col items-center text-center h-full justify-center">
-                    <div className="text-red-500 text-lg mb-2">⚠️</div>
-                    <p className="text-red-600 font-medium">{error}</p>
-                    <button onClick={() => window.location.reload()} className="mt-4 text-sm text-gray-500 underline hover:text-gray-800">Reintentar</button>
-                </div>
-            )}
+            {error && !loading ? (
+              <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+                <div className="mb-2 text-lg text-red-500">⚠️</div>
+                <p className="font-medium text-red-600">{error}</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="mt-4 text-sm text-gray-500 underline hover:text-gray-800"
+                >
+                  Reintentar
+                </button>
+              </div>
+            ) : null}
 
-            {/* --- LISTA --- */}
-            {!loading && !error && (
-                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar" style={{ maxHeight: "60vh" }}>
-                    {projects.length > 0 ? (
-                    <ul className="flex flex-col gap-3">
-                        {projects.map((p) => (
-                        <li
-                            key={p.id}
-                            className="group bg-white border border-gray-100 hover:border-[rgb(170,32,47)]/30 hover:shadow-md rounded-xl p-4 flex justify-between items-center transition-all duration-300"
+            {!loading && !error ? (
+              <div
+                className="custom-scrollbar flex-1 overflow-y-auto p-4"
+                style={{ maxHeight: "60vh" }}
+              >
+                {projects.length > 0 ? (
+                  <ul className="flex flex-col gap-3">
+                    {projects.map((p) => (
+                      <li
+                        key={p.id}
+                        className="group flex items-center justify-between rounded-xl border border-gray-100 bg-white p-4 transition-all duration-300 hover:border-[rgb(170,32,47)]/30 hover:shadow-md"
+                      >
+                        <div className="pr-4">
+                          <h3 className="text-sm font-bold text-gray-800 transition-colors group-hover:text-[rgb(170,32,47)]">
+                            {p.name}
+                          </h3>
+                        </div>
+
+                        <button
+                          className="whitespace-nowrap rounded-lg bg-[rgb(170,32,47)] px-4 py-2 text-xs font-semibold text-white opacity-0 shadow-sm transition-all duration-300 hover:bg-[rgb(150,28,42)] hover:shadow-md active:scale-95 group-hover:translate-x-0 group-hover:opacity-100 translate-x-2"
+                          onClick={() => {
+                            sessionStorage.setItem(
+                              "altProjectId",
+                              p.alternativeIdentifiers?.dataManagementAPIProjectId
+                            );
+                            sessionStorage.setItem("projectName", p.name);
+                            navigate(`/plans/${p.id}`);
+                          }}
                         >
-                            <div className="pr-4">
-                                <h3 className="text-sm font-bold text-gray-800 group-hover:text-[rgb(170,32,47)] transition-colors">
-                                    {p.name}
-                                </h3>
-                                {/* Se eliminó el párrafo con el ID para limpiar la vista */}
-                            </div>
-
-                            <button
-                                className="opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0 rounded-lg bg-[rgb(170,32,47)] text-white px-4 py-2 text-xs font-semibold shadow-sm transition-all duration-300 hover:bg-[rgb(150,28,42)] hover:shadow-md active:scale-95 whitespace-nowrap"
-                                onClick={() => {
-                                    sessionStorage.setItem(
-                                    "altProjectId",
-                                    p.alternativeIdentifiers?.dataManagementAPIProjectId
-                                    );
-                                    sessionStorage.setItem("projectName", p.name);
-                                    navigate(`/plans/${p.id}`);
-                                }}
-                            >
-                                Abrir Proyecto →
-                            </button>
-                        </li>
-                        ))}
-                    </ul>
-                    ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-400 py-10">
-                        <FolderOpen className="h-10 w-10 mb-2 opacity-20" />
-                        <p>No se encontraron proyectos disponibles.</p>
-                    </div>
-                    )}
-                </div>
-            )}
+                          Abrir Proyecto →
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center py-10 text-gray-400">
+                    <FolderOpen className="mb-2 h-10 w-10 opacity-20" />
+                    <p>No se encontraron proyectos disponibles.</p>
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

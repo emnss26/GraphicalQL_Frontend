@@ -1,23 +1,22 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import React from "react";
+import { useNavigate } from "react-router-dom";
 
-const NotAuthorizedPage = () => {
+export default function NotAuthorizedPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-red-50 text-center p-4">
-      <h1 className="text-5xl font-bold text-red-600 mb-4">Acceso Denegado</h1>
-      <p className="text-lg text-gray-700 mb-8">
+    <div className="flex h-screen flex-col items-center justify-center bg-red-50 p-4 text-center">
+      <h1 className="mb-4 text-5xl font-bold text-red-600">Acceso Denegado</h1>
+      <p className="mb-8 text-lg text-gray-700">
         Tu sesión ha expirado o no tienes permisos para ver este recurso.
       </p>
       <button
-        onClick={() => navigate('/login')}
-        className="px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
+        type="button"
+        onClick={() => navigate("/login")}
+        className="rounded bg-red-600 px-6 py-2 text-white transition hover:bg-red-700"
       >
         Ir a Login
       </button>
     </div>
   );
-};
-
-export default NotAuthorizedPage;
+}

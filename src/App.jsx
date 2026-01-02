@@ -10,6 +10,8 @@ import AECModelPlansPage from './pages/AEC_Model/AEC_Plans_Model'
 import NotFoundPage from './pages/General_Pages/NotFound.Page'; 
 import NotAuthorizedPage from './pages/General_Pages/NotAuthorized.Page';
 
+import { Toaster } from  "@/components/ui/sonner"
+
 function App() {
   return (
     <CookiesProvider>
@@ -26,6 +28,9 @@ function App() {
           <Route path="*" element={<NotFoundPage />} />
         
         </Routes>
+        
+        <Toaster position="top-right" richColors closeButton />
+
       </Router>
     </CookiesProvider>
   );
