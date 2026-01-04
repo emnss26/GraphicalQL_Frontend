@@ -451,6 +451,7 @@ export default function AECModelPlansPage() {
       });
 
       const json = await safeJson(res, url);
+      console.log("Sync match response:", json);
       if (!res.ok) throw new Error(json?.error || "Error en sincronización.");
 
       await loadPlans();
