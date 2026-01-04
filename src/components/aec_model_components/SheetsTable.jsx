@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   Table,
   TableBody,
@@ -36,6 +36,7 @@ import {
   Filter,
   Eye,
   EyeOff,
+  GripVertical, // Icono para el resizer
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -49,31 +50,32 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+// Definimos anchos iniciales en Píxeles (px) para permitir el resize matemático
 const COLUMN_DEFINITIONS = [
-  { id: "index", label: "#", group: "basic", width: "w-12" },
-  { id: "number", label: "N° Plano", group: "basic", sortable: true, width: "min-w-[100px]" },
-  { id: "name", label: "Nombre", group: "basic", sortable: true, width: "min-w-[140px]" },
-  { id: "currentRevision", label: "Rev.", group: "basic", tooltip: "Revisión actual del plano", sortable: true, width: "w-20" },
-  { id: "currentRevisionDate", label: "Fecha Rev.", group: "basic", sortable: true, width: "w-28" },
+  { id: "index", label: "#", group: "basic", width: 50 },
+  { id: "number", label: "N° Plano", group: "basic", sortable: true, width: 120 },
+  { id: "name", label: "Nombre", group: "basic", sortable: true, width: 250 }, // Más ancho por defecto
+  { id: "currentRevision", label: "Rev.", group: "basic", tooltip: "Revisión actual del plano", sortable: true, width: 60 },
+  { id: "currentRevisionDate", label: "Fecha Rev.", group: "basic", sortable: true, width: 100 },
 
-  { id: "plannedGenDate", label: "Gen. Programada", group: "generation", tooltip: "Fecha programada de generación", sortable: true, width: "w-36" },
-  { id: "actualGenDate", label: "Gen. Real", group: "generation", sortable: true, width: "w-28" },
-  { id: "docsVersion", label: "Ver.", group: "generation", width: "w-16" },
-  { id: "docsVersionDate", label: "Últ. Versión", group: "generation", sortable: true, width: "w-28" },
+  { id: "plannedGenDate", label: "Gen. Prog.", group: "generation", tooltip: "Fecha programada de generación", sortable: true, width: 110 },
+  { id: "actualGenDate", label: "Gen. Real", group: "generation", sortable: true, width: 100 },
+  { id: "docsVersion", label: "Ver.", group: "generation", width: 50 },
+  { id: "docsVersionDate", label: "Últ. Versión", group: "generation", sortable: true, width: 100 },
 
-  { id: "plannedReviewDate", label: "Rev. Programada", group: "review", tooltip: "Fecha programada de revisión técnica", sortable: true, width: "w-36" },
-  { id: "hasApprovalFlow", label: "Aprob.", group: "review", tooltip: "Aprobación en Docs", width: "w-20" },
-  { id: "actualReviewDate", label: "Rev. Real", group: "review", sortable: true, width: "w-28" },
-  { id: "lastReviewDate", label: "Últ. Flujo", group: "review", sortable: true, width: "w-28" },
-  { id: "lastReviewStatus", label: "Estado Flujo", group: "review", sortable: true, width: "w-24" },
+  { id: "plannedReviewDate", label: "Rev. Prog.", group: "review", tooltip: "Fecha programada de revisión técnica", sortable: true, width: 110 },
+  { id: "hasApprovalFlow", label: "Aprob.", group: "review", tooltip: "Aprobación en Docs", width: 60 },
+  { id: "actualReviewDate", label: "Rev. Real", group: "review", sortable: true, width: 100 },
+  { id: "lastReviewDate", label: "Últ. Flujo", group: "review", sortable: true, width: 100 },
+  { id: "lastReviewStatus", label: "Estado", group: "review", sortable: true, width: 100 },
 
-  { id: "plannedIssueDate", label: "Emisión Prog.", group: "issue", tooltip: "Fecha programada de emisión a construcción", sortable: true, width: "w-36" },
-  { id: "actualIssueDate", label: "Emisión Real", group: "issue", sortable: true, width: "w-28" },
-  { id: "issueUpdatedAt", label: "Actualizado", group: "issue", sortable: true, width: "w-28" },
-  { id: "issueVersionSetName", label: "Conjunto", group: "issue", sortable: true, width: "w-24" },
+  { id: "plannedIssueDate", label: "Emisión Prog.", group: "issue", tooltip: "Fecha programada de emisión a construcción", sortable: true, width: 110 },
+  { id: "actualIssueDate", label: "Emisión Real", group: "issue", sortable: true, width: 100 },
+  { id: "issueUpdatedAt", label: "Actualizado", group: "issue", sortable: true, width: 100 },
+  { id: "issueVersionSetName", label: "Conjunto", group: "issue", sortable: true, width: 100 },
 
-  { id: "progress", label: "Progreso", group: "status", width: "w-32" },
-  { id: "actions", label: "Acciones", group: "status", width: "w-24" },
+  { id: "progress", label: "Progreso", group: "status", width: 120 },
+  { id: "actions", label: "Acciones", group: "status", width: 80 },
 ];
 
 const COLUMN_GROUPS = {
@@ -84,11 +86,15 @@ const COLUMN_GROUPS = {
   status: { label: "Estado", color: "bg-zinc-500" },
 };
 
+// --- HELPERS DE FECHA ---
 const isoToDMY = (iso) => {
   if (!iso) return "";
-  const m = String(iso).substring(0, 10).match(/^\d{4}-\d{2}-\d{2}$/);
+  // Aseguramos tomar solo la parte de la fecha YYYY-MM-DD
+  const cleanIso = String(iso).split('T')[0]; 
+  const m = cleanIso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return "";
-  const [y, mm, dd] = m[0].split("-");
+  const [_, y, mm, dd] = m;
+  // Retornamos formato México: DD/MM/AAAA
   return `${dd}/${mm}/${y}`;
 };
 
@@ -97,26 +103,29 @@ const dmyToISO = (dmy) => {
   const m = String(dmy).trim().match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})$/);
   if (!m) return "";
   let [, dd, mm, yy] = m;
-  const d = parseInt(dd, 10);
-  const mo = parseInt(mm, 10) - 1;
+  // Pad left con 0 si es necesario (ej: 1 -> 01)
+  const dStr = dd.padStart(2, '0');
+  const mStr = mm.padStart(2, '0');
   let y = parseInt(yy, 10);
   if (y < 100) y = 2000 + y;
-  const dt = new Date(Date.UTC(y, mo, d));
-  return isNaN(dt) ? "" : dt.toISOString().slice(0, 10);
+  
+  return `${y}-${mStr}-${dStr}`;
 };
 
 const toInputDateValue = (dmy) => {
   if (!dmy) return "";
   const parts = dmy.split("/");
   if (parts.length !== 3) return "";
+  // El input type="date" SIEMPRE requiere YYYY-MM-DD internamente, aunque muestre otra cosa
   return `${parts[2]}-${parts[1]}-${parts[0]}`;
 };
 
 const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
 
+// --- COMPONENTES UI ---
+
 const ProgressBar = ({ pct }) => {
   let info = { color: "bg-gray-300", label: "Pendiente", textColor: "text-gray-500" };
-
   if (pct >= 100) info = { color: "bg-green-600", label: "Completado", textColor: "text-green-700" };
   else if (pct >= 66) info = { color: "bg-blue-600", label: "En revisión", textColor: "text-blue-700" };
   else if (pct >= 33) info = { color: "bg-yellow-500", label: "Generado", textColor: "text-yellow-700" };
@@ -131,10 +140,6 @@ const ProgressBar = ({ pct }) => {
                 className={`h-full rounded-full transition-all duration-500 ${info.color}`}
                 style={{ width: `${pct}%` }}
               />
-            </div>
-            <div className="flex justify-between text-[10px]">
-              <span className={`font-medium ${info.textColor}`}>{info.label}</span>
-              <span className="font-bold">{pct}%</span>
             </div>
           </div>
         </TooltipTrigger>
@@ -170,24 +175,24 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-// Uncontrolled date input (defaultValue + onBlur commit).
 const DateCell = ({ value, editable, onCommit }) => {
   if (editable) {
     return (
-      <div className="group relative w-full">
+      <div className="group relative w-full h-full">
         <Input
           type="date"
           defaultValue={toInputDateValue(value)}
           onBlur={(e) => onCommit?.(e.target.value)}
-          className="h-7 w-full cursor-pointer px-1 pr-6 text-xs"
+          className="h-full w-full cursor-pointer px-1 pr-1 text-xs bg-transparent border-transparent focus:bg-white focus:border-input shadow-none"
         />
-        <Calendar className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground opacity-50" />
+        {/* Truco visual: Ocultamos el icono de calendario por defecto del input si queremos usar uno custom, 
+            pero aquí solo lo hacemos más sutil. El formato al editar depende del navegador */}
       </div>
     );
   }
 
   return (
-    <span className={cn("whitespace-nowrap text-xs", !value && "text-muted-foreground italic")}>
+    <span className={cn("whitespace-nowrap text-xs block truncate", !value && "text-muted-foreground italic")}>
       {value || "—"}
     </span>
   );
@@ -205,16 +210,16 @@ const SortableHeader = ({
   const content = (
     <div
       className={cn(
-        "flex select-none items-center gap-1.5",
+        "flex select-none items-center gap-1.5 overflow-hidden",
         sortable && "cursor-pointer transition-colors hover:text-foreground",
         className
       )}
       onClick={sortable ? onSort : undefined}
     >
-      {Icon && <Icon className="h-3 w-3 opacity-70" />}
+      {Icon && <Icon className="h-3 w-3 opacity-70 flex-shrink-0" />}
       <span className="truncate font-semibold">{children}</span>
       {sortable && (
-        <span className="ml-auto">
+        <span className="ml-auto flex-shrink-0">
           {sortDirection === "asc" ? (
             <ChevronUp className="h-3 w-3" />
           ) : sortDirection === "desc" ? (
@@ -241,6 +246,7 @@ const SortableHeader = ({
   );
 };
 
+// --- VISIBILIDAD DE COLUMNAS ---
 const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
   const groups = useMemo(() => {
     const g = {};
@@ -250,12 +256,6 @@ const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
     });
     return g;
   }, [columns]);
-
-  const handleShowAll = () => {
-    columns.forEach((c) => {
-      if (!visibleColumns.has(c.id)) onToggle(c.id);
-    });
-  };
 
   return (
     <Popover>
@@ -268,12 +268,10 @@ const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
           </Badge>
         </Button>
       </PopoverTrigger>
-
       <PopoverContent className="w-64 p-0" align="end">
         <div className="border-b bg-muted/20 p-3">
           <h4 className="text-sm font-medium">Visibilidad de columnas</h4>
         </div>
-
         <div className="max-h-[300px] overflow-y-auto p-2">
           {Object.entries(groups).map(([groupKey, cols]) => (
             <div key={groupKey} className="mb-4 last:mb-0">
@@ -283,12 +281,8 @@ const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
                   {COLUMN_GROUPS[groupKey]?.label}
                 </span>
               </div>
-
               {cols.map((col) => (
-                <div
-                  key={col.id}
-                  className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 hover:bg-accent"
-                >
+                <div key={col.id} className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 hover:bg-accent">
                   <Checkbox
                     checked={visibleColumns.has(col.id)}
                     id={`col-${col.id}`}
@@ -307,13 +301,12 @@ const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
             </div>
           ))}
         </div>
-
         <div className="flex justify-between border-t bg-muted/20 p-2">
           <Button
             variant="ghost"
             size="sm"
             className="h-7 px-2 text-xs"
-            onClick={handleShowAll}
+            onClick={() => columns.forEach(c => !visibleColumns.has(c.id) && onToggle(c.id))}
           >
             Mostrar Todo
           </Button>
@@ -323,6 +316,7 @@ const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
   );
 };
 
+// --- COMPONENTE PRINCIPAL ---
 export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow = () => {} }) {
   const [rows, setRows] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -330,16 +324,53 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
   const [visibleColumns, setVisibleColumns] = useState(
     new Set(COLUMN_DEFINITIONS.map((c) => c.id))
   );
-  const [deleteTarget, setDeleteTarget] = useState(null); // { index:number, label:string }
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  // --- LÓGICA DE RESIZE DE COLUMNAS ---
+  // Mapa de ID -> Ancho en px
+  const [columnWidths, setColumnWidths] = useState(() => {
+    const initial = {};
+    COLUMN_DEFINITIONS.forEach(col => initial[col.id] = col.width);
+    return initial;
+  });
+
+  const resizingRef = useRef(null); // { columnId, startX, startWidth }
+
+  const handleMouseDown = (e, columnId) => {
+    e.preventDefault();
+    resizingRef.current = {
+      columnId,
+      startX: e.pageX,
+      startWidth: columnWidths[columnId] || 100
+    };
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    document.body.style.cursor = "col-resize";
+  };
+
+  const handleMouseMove = (e) => {
+    if (!resizingRef.current) return;
+    const { columnId, startX, startWidth } = resizingRef.current;
+    const diff = e.pageX - startX;
+    const newWidth = Math.max(50, startWidth + diff); // Mínimo 50px
+
+    setColumnWidths(prev => ({
+      ...prev,
+      [columnId]: newWidth
+    }));
+  };
+
+  const handleMouseUp = () => {
+    resizingRef.current = null;
+    document.removeEventListener("mousemove", handleMouseMove);
+    document.removeEventListener("mouseup", handleMouseUp);
+    document.body.style.cursor = "default";
+  };
 
   const DATE_FIELDS = useMemo(
     () => [
-      "plannedGenDate",
-      "actualGenDate",
-      "plannedReviewDate",
-      "actualReviewDate",
-      "plannedIssueDate",
-      "actualIssueDate",
+      "plannedGenDate", "actualGenDate", "plannedReviewDate",
+      "actualReviewDate", "plannedIssueDate", "actualIssueDate",
     ],
     []
   );
@@ -370,7 +401,6 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
     setRows(Array.isArray(data) ? data.map(normalizeRow) : []);
   }, [data]);
 
-  // Keep the original index (realIndex) to avoid rows.indexOf(...) O(n²) lookups.
   const processedRows = useMemo(() => {
     let result = rows.map((row, realIndex) => ({ row, realIndex }));
 
@@ -421,7 +451,9 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
     });
 
     if (DATE_FIELDS.includes(field)) {
-      const iso = value ? (dmyToISO(value) || null) : null;
+      // Convertir de YYYY-MM-DD (input value) a ISO (YYYY-MM-DD) para DB
+      // Como el input ya da formato ISO, solo lo validamos
+      const iso = value || null;
       onEdit(realIndex, field, iso);
       return;
     }
@@ -430,9 +462,20 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
   };
 
   const commitDateFromInput = (realIndex, field, yyyyMMdd) => {
-    if (!yyyyMMdd) return commitCell(realIndex, field, "");
-    const [y, m, d] = yyyyMMdd.split("-");
-    return commitCell(realIndex, field, `${d}/${m}/${y}`);
+     // El input devuelve YYYY-MM-DD. Convertimos a DD/MM/AAAA para visualización en estado local
+     if (!yyyyMMdd) return commitCell(realIndex, field, "");
+     const [y, m, d] = yyyyMMdd.split("-");
+     const dmy = `${d}/${m}/${y}`;
+     
+     // Actualizamos estado local
+     setRows(prev => {
+        const clone = [...prev];
+        clone[realIndex] = { ...clone[realIndex], [field]: dmy };
+        return clone;
+     });
+     
+     // Enviamos ISO al backend
+     onEdit(realIndex, field, yyyyMMdd);
   };
 
   const getProgress = (r) => {
@@ -484,10 +527,11 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
 
       <div className="overflow-hidden rounded-md border bg-card shadow-sm">
         <div className="overflow-x-auto">
-          <Table className="w-full text-xs">
+          {/* Usamos table-fixed para que el resize funcione correctamente */}
+          <Table className="w-full text-xs table-fixed">
             <TableHeader>
               <TableRow className="border-b border-border bg-muted/50 hover:bg-muted/50">
-                {isVisible("index") && <TableHead className="py-1" />}
+                {isVisible("index") && <TableHead style={{ width: columnWidths["index"] }} className="py-1" />}
                 {Object.keys(COLUMN_GROUPS).map((groupKey) => {
                   const groupCols = COLUMN_DEFINITIONS.filter(
                     (c) => c.group === groupKey && isVisible(c.id)
@@ -499,10 +543,14 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                       ? "bg-blue-50 text-blue-700 border-b-blue-200"
                       : "bg-zinc-50 text-zinc-700 border-b-zinc-200";
 
+                  // Calculamos ancho total del grupo sumando las columnas visibles
+                  const groupWidth = groupCols.reduce((acc, col) => acc + (columnWidths[col.id] || 100), 0);
+
                   return (
                     <TableHead
                       key={groupKey}
                       colSpan={groupCols.length}
+                      style={{ width: groupWidth }}
                       className={`border-l border-r border-white py-2 text-center text-[10px] font-bold uppercase tracking-wider ${style}`}
                     >
                       {COLUMN_GROUPS[groupKey].label}
@@ -515,11 +563,15 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                 {COLUMN_DEFINITIONS.map((col) => {
                   if (!isVisible(col.id)) return null;
 
-                  let cellClass = "h-10 px-3 py-2 border-r last:border-r-0 border-border/50";
+                  let cellClass = "h-10 px-2 py-2 border-r last:border-r-0 border-border/50 relative";
                   if (col.group === "generation" || col.group === "issue") cellClass += " bg-blue-50/30";
 
                   return (
-                    <TableHead key={col.id} className={`${col.width} ${cellClass}`}>
+                    <TableHead
+                      key={col.id}
+                      style={{ width: columnWidths[col.id] }}
+                      className={cellClass}
+                    >
                       <SortableHeader
                         icon={
                           col.id === "number"
@@ -535,6 +587,13 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                       >
                         {col.label}
                       </SortableHeader>
+                      
+                      {/* RESIZE HANDLE */}
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, col.id)}
+                        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-100 transition-opacity z-10"
+                        title="Arrastra para redimensionar"
+                      />
                     </TableHead>
                   );
                 })}
@@ -568,7 +627,7 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                       )}
                     >
                       {isVisible("index") && (
-                        <TableCell className="border-r bg-muted/20 text-center font-mono text-muted-foreground">
+                        <TableCell className="border-r bg-muted/20 text-center font-mono text-muted-foreground overflow-hidden text-ellipsis">
                           {realIndex + 1}
                         </TableCell>
                       )}
@@ -579,7 +638,7 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                             key={`${rowKey}-number-${r.number}`}
                             defaultValue={r.number}
                             onBlur={(e) => commitCell(realIndex, "number", e.target.value)}
-                            className="h-7 border-transparent bg-transparent text-xs font-medium focus:border-primary"
+                            className="h-7 border-transparent bg-transparent text-xs font-medium focus:border-primary px-1"
                           />
                         </TableCell>
                       )}
@@ -590,7 +649,7 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                             key={`${rowKey}-name-${r.name}`}
                             defaultValue={r.name}
                             onBlur={(e) => commitCell(realIndex, "name", e.target.value)}
-                            className="h-7 border-transparent bg-transparent text-xs focus:border-primary"
+                            className="h-7 border-transparent bg-transparent text-xs focus:border-primary px-1"
                           />
                         </TableCell>
                       )}
@@ -604,7 +663,7 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                       )}
 
                       {isVisible("currentRevisionDate") && (
-                        <TableCell className="border-r text-muted-foreground">
+                        <TableCell className="border-r text-muted-foreground overflow-hidden text-ellipsis px-2">
                           {r.currentRevisionDate}
                         </TableCell>
                       )}
@@ -623,7 +682,7 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                       )}
 
                       {isVisible("actualGenDate") && (
-                        <TableCell className="border-r bg-blue-50/20">
+                        <TableCell className="border-r bg-blue-50/20 px-2">
                           <DateCell value={r.actualGenDate} />
                         </TableCell>
                       )}
@@ -635,7 +694,7 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                       )}
 
                       {isVisible("docsVersionDate") && (
-                        <TableCell className="border-r bg-blue-50/20">
+                        <TableCell className="border-r bg-blue-50/20 px-2">
                           <DateCell value={r.docsVersionDate} />
                         </TableCell>
                       )}
@@ -664,19 +723,19 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                       )}
 
                       {isVisible("actualReviewDate") && (
-                        <TableCell className="border-r">
+                        <TableCell className="border-r px-2">
                           <DateCell value={r.actualReviewDate} />
                         </TableCell>
                       )}
 
                       {isVisible("lastReviewDate") && (
-                        <TableCell className="border-r">
+                        <TableCell className="border-r px-2">
                           <DateCell value={r.lastReviewDate} />
                         </TableCell>
                       )}
 
                       {isVisible("lastReviewStatus") && (
-                        <TableCell className="border-r">
+                        <TableCell className="border-r px-2">
                           <StatusBadge status={r.lastReviewStatus} />
                         </TableCell>
                       )}
@@ -695,19 +754,19 @@ export default function SheetsTable({ data = [], onEdit = () => {}, onDeleteRow 
                       )}
 
                       {isVisible("actualIssueDate") && (
-                        <TableCell className="border-r bg-blue-50/20">
+                        <TableCell className="border-r bg-blue-50/20 px-2">
                           <DateCell value={r.actualIssueDate} />
                         </TableCell>
                       )}
 
                       {isVisible("issueUpdatedAt") && (
-                        <TableCell className="border-r bg-blue-50/20">
+                        <TableCell className="border-r bg-blue-50/20 px-2">
                           <DateCell value={r.issueUpdatedAt} />
                         </TableCell>
                       )}
 
                       {isVisible("issueVersionSetName") && (
-                        <TableCell className="border-r bg-blue-50/20 text-muted-foreground">
+                        <TableCell className="border-r bg-blue-50/20 text-muted-foreground px-2 overflow-hidden text-ellipsis">
                           {r.issueVersionSetName}
                         </TableCell>
                       )}
