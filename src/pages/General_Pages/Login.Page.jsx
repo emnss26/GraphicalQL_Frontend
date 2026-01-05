@@ -10,7 +10,7 @@ export default function LoginPage() {
       response_type: "code",
       client_id: clientId,
       redirect_uri: `${backendUrl}/auth/three-legged`,
-      scope: "data:read data:create data:write",
+      scope: "account:read data:read data:create data:write",
     });
 
     window.location.href = `https://developer.api.autodesk.com/authentication/v2/authorize?${params.toString()}`;
