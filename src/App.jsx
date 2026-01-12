@@ -6,16 +6,16 @@ import LoginPage from './pages/General_Pages/Login.Page';
 import AECProjectsPage from './pages/AEC_Model/AEC_Projects_Home';
 import AECModelPlansPage from './pages/AEC_Model/AEC_Plans_Model'
 
-
 import NotFoundPage from './pages/General_Pages/NotFound.Page'; 
 import NotAuthorizedPage from './pages/General_Pages/NotAuthorized.Page';
 
-import { Toaster } from  "@/components/ui/sonner"
+import { Toaster } from "@/components/ui/sonner"
 
 function App() {
   return (
     <CookiesProvider>
-      <Router>
+
+      <Router basename="/ControlPlanos">
         <Routes>
           <Route exact path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
@@ -36,4 +36,4 @@ function App() {
   );
 }
 
-export default App
+export default App;
