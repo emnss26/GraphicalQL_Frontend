@@ -3,6 +3,10 @@ import { useCookies } from "react-cookie";
 import { useParams, useNavigate } from "react-router-dom";
 import { read, utils, writeFile } from "xlsx";
 
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+import AlertsTable from "@/components/aec_model_components/AlertsTable";
+
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,10 +27,12 @@ import {
   AlertCircle,
   BarChart3,
   Boxes,
+  CalendarDays,
   CheckCircle2,
   ChevronDown,
   Clock,
   FileDown,
+  FileText,
   FileUp,
   FolderOpen,
   Plus,
@@ -39,12 +45,15 @@ import AppLayout from "@/components/general_component/AppLayout";
 import AnalyticsDashboard from "@/components/general_component/AnalyticsDashboard";
 import AbitatLogoLoader from "@/components/general_component/AbitatLogoLoader";
 import SheetsTable from "@/components/aec_model_components/SheetsTable";
+import ControlTable from "@/components/aec_model_components/ControlTable";
 import SelectFolderModal from "@/components/aec_model_components/SelectFolderModal";
 import SelectModelsModal from "@/components/aec_model_components/SelectModelModal";
 
+
+import autoTable from "jspdf-autotable";
+
 const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 
-// --- Funciones Auxiliares (sin cambios) ---
 const emptyPlan = () => ({
   id: null,
   name: "",
@@ -112,43 +121,85 @@ const isGenProg = (h) => ["fecha gen. (programada)", "fecha de generación (prog
 const isRevProg = (h) => ["rev. técnica (programada)", "revisión técnica (programada)", "revision tecnica (programada)", "planned review date"].includes(norm(h));
 const isEmiProg = (h) => ["emisión (programada)", "emision (programada)", "emisión a construcción (programada)", "planned issue date"].includes(norm(h));
 
+const TABLE_COLUMN_ORDER = [
+  "index",
+  "number",
+  "name",
+  "currentRevision",
+  "currentRevisionDate",
+  "plannedGenDate",
+  "actualGenDate",
+  "docsVersion",
+  "docsVersionDate",
+  "plannedReviewDate",
+  "hasApprovalFlow",
+  "actualReviewDate",
+  "lastReviewDate",
+  "lastReviewStatus",
+  "plannedIssueDate",
+  "actualIssueDate",
+  "issueUpdatedAt",
+  "issueVersionSetName",
+  "progress",
+  "actions",
+];
+
+const CONTROL_INFO_COLUMN_ORDER = [
+  "number",
+  "name",
+  "plannedGenDate",
+  "actualGenDate",
+  "plannedReviewDate",
+  "actualReviewDate",
+  "plannedIssueDate",
+  "actualIssueDate",
+];
+
 // --- Componente Principal ---
 export default function AECModelPlansPage() {
   const [cookies] = useCookies(["access_token"]);
   const { projectId } = useParams();
   const navigate = useNavigate();
 
+  const [alerts, setAlerts] = useState([]);
+
   const altProjectId = sessionStorage.getItem("altProjectId");
   const projectName = sessionStorage.getItem("projectName");
 
   const [viewMode, setViewMode] = useState("table");
 
-  // Estados de Datos (Carga diferida)
+  // Estados de Datos
   const [models, setModels] = useState([]);
   const [folderTree, setFolderTree] = useState([]);
   
-  // Estados de Selección (Se cargan al inicio)
   const [selectedModelsIds, setSelectedModelsIds] = useState([]);
   const [selectedFolderId, setSelectedFolderId] = useState(null);
 
   const [plans, setPlans] = useState([]);
   
-  // Estados de UI (Modales y Carga)
   const [modalModelsOpen, setModalModelsOpen] = useState(false);
   const [modalFoldersOpen, setModalFoldersOpen] = useState(false);
   
   const [error, setError] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   
-  // Estados de carga granulares
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
   const [loadingModels, setLoadingModels] = useState(false);
   const [loadingTree, setLoadingTree] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [visibleTableColumns, setVisibleTableColumns] = useState(() => [...TABLE_COLUMN_ORDER]);
+  const [visibleControlColumns, setVisibleControlColumns] = useState(() => [...CONTROL_INFO_COLUMN_ORDER]);
 
   const fileInputRef = useRef(null);
+  const reportRef = useRef(null); 
+  const dashboardExportRef = useRef(null);
 
   const apiBase = (backendUrl || "").replace(/\/$/, "");
   const pId = encodeURIComponent(projectId || "");
+  
+  const TABLOID_LANDSCAPE_MM = [431.8, 279.4];
+  const fmtDMY = (iso) => isoToDMY(iso || "");
+
 
   const safeJson = async (res, urlForMsg) => {
     const ctype = res.headers.get("content-type") || "";
@@ -172,7 +223,18 @@ export default function AECModelPlansPage() {
     return { total, completed, inReview, pending, completionRate };
   }, [plans]);
 
-  // 1. CARGA INICIAL (Solo Configuración Guardada y Tabla de Planos)
+  const loadAlerts = async () => {
+    try {
+      const r = await fetch(`${apiBase}/plans/${pId}/alerts`, { credentials: "include" });
+      const j = await safeJson(r, "alerts");
+      setAlerts(j.data?.alerts || []);
+    } catch (e) {
+      console.error("Error cargando alertas:", e);
+      setAlerts([]);
+    }
+  };
+
+  // 1. CARGA INICIAL
   useEffect(() => {
     const initData = async () => {
       setIsLoadingInitial(true);
@@ -190,6 +252,8 @@ export default function AECModelPlansPage() {
         const loaded = plansJson.data?.plans ?? [];
         setPlans(loaded.length === 0 ? Array.from({ length: 10 }, emptyPlan) : loaded);
         
+        await loadAlerts();
+
       } catch (err) {
         console.error("Error carga inicial:", err);
         if (plans.length === 0) setPlans(Array.from({ length: 10 }, emptyPlan));
@@ -201,27 +265,17 @@ export default function AECModelPlansPage() {
     if (pId) initData();
   }, [apiBase, pId]);
 
-
-  // 2. HANDLERS "LAZY LOADING" (MODIFICADOS CON TOAST)
-
-  // Cargar Modelos (Ahora con Toast y Loading State)
+  // 2. HANDLERS
   const handleOpenModelsModal = async () => {
     setModalModelsOpen(true);
-    
     if (models.length === 0) {
         setLoadingModels(true);
-        // Toast de carga para modelos
         const tId = toast.loading("Cargando lista de modelos..."); 
-        
         try {
             const r = await fetch(`${apiBase}/aec/${pId}/graphql-models`, { credentials: "include" });
             const j = await safeJson(r, "graphql-models");
-            
             if(!j.success && j.error) throw new Error(j.error);
-
             setModels(j.data?.models || []);
-            
-            // Actualizamos el toast a éxito
             toast.success("Modelos cargados", { id: tId });
         } catch (e) {
             console.error("Error cargando modelos:", e);
@@ -232,29 +286,22 @@ export default function AECModelPlansPage() {
     }
   };
 
-  // Cargar Carpetas (REST / Data Management)
   const handleOpenFoldersModal = async () => {
     setModalFoldersOpen(true);
-    
     if (folderTree.length === 0) {
         if (!altProjectId) {
             toast.error("Falta ID de Data Management.");
             return;
         }
-
         setLoadingTree(true);
-        const tId = toast.loading("Escaneando estructura de carpetas... (esto puede demorar)");
-        
+        const tId = toast.loading("Escaneando estructura de carpetas...");
         try {
             const endpoint = `${apiBase}/dm/project-folders?dmId=${altProjectId}`;
             const response = await fetch(endpoint, { credentials: "include" });
             const result = await safeJson(response, endpoint);
-            
             if (!result.success) throw new Error(result.message);
-
             setFolderTree(result.data.folderTree || []);
             toast.success("Estructura cargada.", { id: tId });
-
         } catch (err) {
             console.error("Error cargando árbol DM:", err);
             toast.error("Error al cargar carpetas.", { id: tId });
@@ -264,7 +311,6 @@ export default function AECModelPlansPage() {
     }
   };
 
-  // ... (Resto de funciones handle igual) ...
   const handleAddRow = () => setPlans((prev) => [...prev, emptyPlan()]);
   
   const handleDeleteRow = async (rowIndex) => {
@@ -282,7 +328,6 @@ export default function AECModelPlansPage() {
     }
     setPlans((prev) => prev.filter((_, i) => i !== rowIndex));
     if (deleteOk) toast.success("Plano eliminado.");
-    else toast.warning("Plano eliminado localmente, pero error en servidor.");
   };
 
   const handleClickImport = () => fileInputRef.current?.click();
@@ -457,6 +502,8 @@ export default function AECModelPlansPage() {
       const reloadJson = await safeJson(reloadRes, "reload");
       setPlans(reloadJson.data?.plans || []);
 
+      await loadAlerts();
+
       toast.success("Sincronización completada.", { id: tId });
     } catch (e) {
       console.error(e);
@@ -481,9 +528,437 @@ export default function AECModelPlansPage() {
     );
   }
 
+  const fetchAsDataURL = async (url) => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`No pude cargar logo: ${url}`);
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  };
+  
+  const loadLogo = async () => {
+    const candidates = ["/Abitat_img.png", "/Abitat_img.jpg", "/Abitat_img.jpeg", "/Abitat_img.webp"];
+    for (const u of candidates) {
+      try { return await fetchAsDataURL(u); } catch (_) {}
+    }
+    return null; 
+  };
+
+
+  const handleExportPDF = async () => {
+    if (viewMode === "alerts") {
+      toast.info("La vista de alertas no tiene exportacion PDF.");
+      return;
+    }
+
+    const tId = toast.loading("Generando PDF...");
+    setIsExportingPdf(true);
+
+    try {
+      if (viewMode === "dashboard") {
+        if (!dashboardExportRef.current) {
+          throw new Error("No se pudo capturar el dashboard.");
+        }
+
+        const canvas = await html2canvas(dashboardExportRef.current, {
+          backgroundColor: "#ffffff",
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          windowWidth: dashboardExportRef.current.scrollWidth,
+          windowHeight: dashboardExportRef.current.scrollHeight,
+        });
+
+        const imgData = canvas.toDataURL("image/png");
+        const pdf = new jsPDF({
+          orientation: "landscape",
+          unit: "mm",
+          format: TABLOID_LANDSCAPE_MM,
+          compress: true,
+        });
+
+        const margin = 8;
+        const pageW = pdf.internal.pageSize.getWidth();
+        const pageH = pdf.internal.pageSize.getHeight();
+        const renderW = pageW - margin * 2;
+        const renderH = (canvas.height * renderW) / canvas.width;
+        const printableH = pageH - margin * 2;
+
+        let rendered = 0;
+        while (rendered < renderH) {
+          if (rendered > 0) pdf.addPage();
+          const y = margin - rendered;
+          pdf.addImage(imgData, "PNG", margin, y, renderW, renderH, undefined, "FAST");
+          rendered += printableH;
+        }
+
+        pdf.save(`Dashboard_${projectName || "Proyecto"}.pdf`);
+        toast.success("PDF del dashboard generado.", { id: tId });
+        return;
+      }
+
+      const logo = await loadLogo();
+      const pdf = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: TABLOID_LANDSCAPE_MM,
+        compress: true,
+      });
+
+      const margin = 6;
+      const headerTop = 10;
+      const title = `Proyecto: ${projectName || "Proyecto"}`;
+      const sub =
+        viewMode === "control"
+          ? `Reporte de Control - ${new Date().toLocaleString("es-MX")}`
+          : `Reporte de Planos - ${new Date().toLocaleString("es-MX")}`;
+
+      const drawPdfHeader = () => {
+        let x = margin;
+        if (logo) {
+          pdf.addImage(logo, "PNG", margin, 6, 24, 10);
+          x = margin + 28;
+        }
+        pdf.setFontSize(12);
+        pdf.text(title, x, headerTop);
+        pdf.setFontSize(9);
+        pdf.text(sub, x, headerTop + 5);
+        const pageWInner = pdf.internal.pageSize.getWidth();
+        pdf.text(`Pagina ${pdf.getNumberOfPages()}`, pageWInner - margin, headerTop, { align: "right" });
+      };
+
+      if (viewMode === "control") {
+        const parseAnyDate = (value) => {
+          if (!value) return null;
+          if (value instanceof Date) {
+            const d = new Date(value.getFullYear(), value.getMonth(), value.getDate(), 12, 0, 0, 0);
+            return Number.isNaN(d.getTime()) ? null : d;
+          }
+          const raw = String(value).trim();
+          if (!raw) return null;
+          const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          if (iso) {
+            const [, y, m, d] = iso;
+            const dt = new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0, 0);
+            return Number.isNaN(dt.getTime()) ? null : dt;
+          }
+          const dmy = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+          if (dmy) {
+            let [, d, m, y] = dmy;
+            if (y.length === 2) y = `20${y}`;
+            const dt = new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0, 0);
+            return Number.isNaN(dt.getTime()) ? null : dt;
+          }
+          const parsed = new Date(raw);
+          if (Number.isNaN(parsed.getTime())) return null;
+          return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 12, 0, 0, 0);
+        };
+
+        const formatDate = (value) => {
+          const d = parseAnyDate(value);
+          if (!d) return "-";
+          const dd = String(d.getDate()).padStart(2, "0");
+          const mm = String(d.getMonth() + 1).padStart(2, "0");
+          const yyyy = d.getFullYear();
+          return `${dd}/${mm}/${yyyy}`;
+        };
+
+        const monthNames = [
+          "Enero",
+          "Febrero",
+          "Marzo",
+          "Abril",
+          "Mayo",
+          "Junio",
+          "Julio",
+          "Agosto",
+          "Septiembre",
+          "Octubre",
+          "Noviembre",
+          "Diciembre",
+        ];
+
+        const startOfWeekMonday = (date) => {
+          const d = new Date(date);
+          const offset = (d.getDay() + 6) % 7;
+          d.setDate(d.getDate() - offset);
+          d.setHours(12, 0, 0, 0);
+          return d;
+        };
+
+        const addDays = (date, days) => {
+          const d = new Date(date);
+          d.setDate(d.getDate() + days);
+          return d;
+        };
+
+        const getFirst = (row, keys) => {
+          for (const key of keys) {
+            const value = row?.[key];
+            if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+          }
+          return "";
+        };
+
+        const controlRows = (plans || [])
+          .filter((r) => (r.name || r.sheet_name || "").trim() || (r.number || r.sheet_number || "").trim())
+          .map((r) => ({
+            number: getFirst(r, ["number", "sheet_number"]),
+            name: getFirst(r, ["name", "sheet_name"]),
+            plannedGenDate: getFirst(r, ["plannedGenDate", "planned_gen_date"]),
+            actualGenDate: getFirst(r, ["actualGenDate", "actual_gen_date"]),
+            plannedReviewDate: getFirst(r, ["plannedReviewDate", "planned_review_date"]),
+            actualReviewDate: getFirst(r, ["actualReviewDate", "actual_review_date"]),
+            plannedIssueDate: getFirst(r, ["plannedIssueDate", "planned_issue_date"]),
+            actualIssueDate: getFirst(r, ["actualIssueDate", "actual_issue_date"]),
+          }));
+
+        const allDates = [];
+        for (const row of controlRows) {
+          [
+            row.plannedGenDate,
+            row.actualGenDate,
+            row.plannedReviewDate,
+            row.actualReviewDate,
+            row.plannedIssueDate,
+            row.actualIssueDate,
+          ].forEach((value) => {
+            const d = parseAnyDate(value);
+            if (d) allDates.push(d);
+          });
+        }
+
+        const minDate = allDates.length ? new Date(Math.min(...allDates.map((d) => d.getTime()))) : new Date();
+        const maxDate = allDates.length ? new Date(Math.max(...allDates.map((d) => d.getTime()))) : new Date();
+        const startDate = startOfWeekMonday(minDate);
+        const endDate = addDays(startOfWeekMonday(maxDate), 6);
+
+        const weeks = [];
+        let cursor = new Date(startDate);
+        let weekNumber = 1;
+        while (cursor.getTime() <= endDate.getTime()) {
+          const start = new Date(cursor);
+          const end = addDays(start, 6);
+          weeks.push({ weekNumber, start, end });
+          cursor = addDays(cursor, 7);
+          weekNumber += 1;
+        }
+
+        const monthGroups = [];
+        weeks.forEach((week) => {
+          const key = `${week.start.getFullYear()}-${week.start.getMonth()}`;
+          const last = monthGroups[monthGroups.length - 1];
+          if (!last || last.key !== key) {
+            monthGroups.push({
+              key,
+              name: monthNames[week.start.getMonth()],
+              year: week.start.getFullYear(),
+              count: 1,
+            });
+          } else {
+            last.count += 1;
+          }
+        });
+
+        const findWeekIndex = (value) => {
+          const d = parseAnyDate(value);
+          if (!d) return null;
+          const idx = weeks.findIndex(
+            (week) => d.getTime() >= week.start.getTime() && d.getTime() <= week.end.getTime()
+          );
+          return idx >= 0 ? idx : null;
+        };
+
+        const controlInfoExportColumns = [
+          { id: "number", label: "N. Plano", getValue: (row) => row.number || "-", style: { cellWidth: 20 } },
+          { id: "name", label: "Nombre", getValue: (row) => row.name || "-", style: { cellWidth: 40 } },
+          { id: "plannedGenDate", label: "Gen. Prog.", getValue: (row) => formatDate(row.plannedGenDate), style: { cellWidth: 16, halign: "center" } },
+          { id: "actualGenDate", label: "Gen. Real", getValue: (row) => formatDate(row.actualGenDate), style: { cellWidth: 16, halign: "center" } },
+          { id: "plannedReviewDate", label: "Rev. Prog.", getValue: (row) => formatDate(row.plannedReviewDate), style: { cellWidth: 16, halign: "center" } },
+          { id: "actualReviewDate", label: "Rev. Real", getValue: (row) => formatDate(row.actualReviewDate), style: { cellWidth: 16, halign: "center" } },
+          { id: "plannedIssueDate", label: "Em. Prog.", getValue: (row) => formatDate(row.plannedIssueDate), style: { cellWidth: 16, halign: "center" } },
+          { id: "actualIssueDate", label: "Em. Real", getValue: (row) => formatDate(row.actualIssueDate), style: { cellWidth: 16, halign: "center" } },
+        ];
+
+        const activeControlInfoColumns = controlInfoExportColumns.filter((col) =>
+          visibleControlColumns.includes(col.id)
+        );
+
+        if (activeControlInfoColumns.length === 0) {
+          toast.warning("No hay columnas visibles en Control para exportar.", { id: tId });
+          return;
+        }
+
+        const fixedColumns = [
+          { id: "index", label: "#", getValue: (_row, index) => index + 1, style: { cellWidth: 10, halign: "center" } },
+          ...activeControlInfoColumns,
+        ];
+
+        const monthHeader = [
+          {
+            content: "Informacion del Plano",
+            colSpan: fixedColumns.length,
+            styles: { halign: "left", fillColor: [243, 244, 246] },
+          },
+          ...monthGroups.map((group) => ({
+            content: `${group.name} ${group.year}`,
+            colSpan: group.count,
+            styles: { halign: "center", fillColor: [243, 244, 246] },
+          })),
+        ];
+
+        const weekHeader = [
+          ...fixedColumns.map((column) => ({ content: column.label, styles: { halign: "center" } })),
+          ...weeks.map((week) => {
+            const sdd = String(week.start.getDate()).padStart(2, "0");
+            const smm = String(week.start.getMonth() + 1).padStart(2, "0");
+            const edd = String(week.end.getDate()).padStart(2, "0");
+            const emm = String(week.end.getMonth() + 1).padStart(2, "0");
+            return { content: `S${week.weekNumber}\n${sdd}/${smm}-${edd}/${emm}`, styles: { halign: "center" } };
+          }),
+        ];
+
+        const body = controlRows.map((row, index) => {
+          const plannedWeek = findWeekIndex(row.plannedIssueDate);
+          const actualWeek = findWeekIndex(row.actualIssueDate);
+          const weekCells = weeks.map((_, idx) => {
+            if (plannedWeek === idx && actualWeek === idx) return "X/X";
+            if (plannedWeek === idx || actualWeek === idx) return "X";
+            return "";
+          });
+
+          return [...fixedColumns.map((column) => column.getValue(row, index)), ...weekCells];
+        });
+
+        const safeBody = body.length ? body : [[...fixedColumns.map(() => "-"), ...weeks.map(() => "")]];
+        const fixedCount = fixedColumns.length;
+        const repeatCols = Array.from({ length: fixedCount }, (_, i) => i);
+        const columnStyles = {};
+        fixedColumns.forEach((column, idx) => {
+          columnStyles[idx] = column.style;
+        });
+        weeks.forEach((_, idx) => {
+          columnStyles[idx + fixedCount] = { cellWidth: 8, halign: "center" };
+        });
+
+        autoTable(pdf, {
+          head: [monthHeader, weekHeader],
+          body: safeBody,
+          theme: "grid",
+          margin: { left: margin, right: margin, top: headerTop + 12, bottom: margin },
+          styles: {
+            fontSize: 6,
+            cellPadding: 1,
+            overflow: "linebreak",
+            valign: "middle",
+          },
+          headStyles: {
+            fontStyle: "bold",
+            textColor: [40, 40, 40],
+          },
+          columnStyles,
+          horizontalPageBreak: true,
+          horizontalPageBreakRepeat: repeatCols,
+          didDrawPage: drawPdfHeader,
+        });
+
+        pdf.save(`Reporte_Control_${projectName || "Proyecto"}.pdf`);
+        toast.success("PDF de control generado con calendario completo.", { id: tId });
+        return;
+      }
+
+      const tableExportColumns = [
+        { id: "index", label: "#", getValue: (_row, index) => index + 1 },
+        { id: "number", label: "N. Plano", getValue: (row) => row.number || row.sheet_number || "" },
+        { id: "name", label: "Nombre", getValue: (row) => row.name || row.sheet_name || "" },
+        { id: "currentRevision", label: "Rev.", getValue: (row) => row.currentRevision || row.current_revision || "" },
+        { id: "currentRevisionDate", label: "Fecha Rev.", getValue: (row) => fmtDMY(row.currentRevisionDate || row.current_revision_date || "") },
+        { id: "plannedGenDate", label: "Gen. Programada", getValue: (row) => fmtDMY(row.plannedGenDate || row.planned_gen_date || "") },
+        { id: "actualGenDate", label: "Gen. Real", getValue: (row) => fmtDMY(row.actualGenDate || row.actual_gen_date || "") },
+        { id: "docsVersion", label: "Ver.", getValue: (row) => row.docsVersion || row.docs_version_number || "" },
+        { id: "docsVersionDate", label: "Ult. Version", getValue: (row) => fmtDMY(row.docsVersionDate || row.docs_last_modified || "") },
+        { id: "plannedReviewDate", label: "Rev. Programada", getValue: (row) => fmtDMY(row.plannedReviewDate || row.planned_review_date || "") },
+        { id: "hasApprovalFlow", label: "Aprob.", getValue: (_row, _index, context) => context.approval },
+        { id: "actualReviewDate", label: "Rev. Real", getValue: (row) => fmtDMY(row.actualReviewDate || row.actual_review_date || "") },
+        { id: "lastReviewDate", label: "Ult. Flujo", getValue: (row) => fmtDMY(row.lastReviewDate || row.latest_review_date || "") },
+        { id: "lastReviewStatus", label: "Estado Flujo", getValue: (row) => row.lastReviewStatus || row.latest_review_status || "-" },
+        { id: "plannedIssueDate", label: "Emision Prog.", getValue: (row) => fmtDMY(row.plannedIssueDate || row.planned_issue_date || "") },
+        { id: "actualIssueDate", label: "Emision Real", getValue: (row) => fmtDMY(row.actualIssueDate || row.actual_issue_date || "") },
+        { id: "issueUpdatedAt", label: "Actualizado", getValue: (row) => fmtDMY(row.issueUpdatedAt || row.sheet_updated_at || "") },
+        { id: "issueVersionSetName", label: "Conjunto", getValue: (row) => row.issueVersionSetName || row.sheet_version_set || "" },
+        { id: "progress", label: "Progreso", getValue: (_row, _index, context) => `${context.progressLabel} (${context.pct}%)` },
+      ];
+
+      const activeTableColumns = tableExportColumns.filter((column) =>
+        visibleTableColumns.includes(column.id)
+      );
+
+      if (activeTableColumns.length === 0) {
+        toast.warning("No hay columnas visibles en Tabla para exportar.", { id: tId });
+        return;
+      }
+
+      const columns = activeTableColumns.map((column) => column.label);
+
+      const rows = (plans || [])
+        .filter((r) => (r.name || r.sheet_name || "").trim() || (r.number || r.sheet_number || "").trim())
+        .map((r, i) => {
+          const hasIssue = !!(r.actualIssueDate || r.actual_issue_date);
+          const hasReview = !!(r.actualReviewDate || r.actual_review_date);
+          const hasGen = !!(r.actualGenDate || r.actual_gen_date);
+          const pct = hasIssue ? 100 : hasReview ? 66 : hasGen ? 33 : 0;
+          const progressLabel = pct >= 100 ? "Completado" : pct >= 66 ? "En revision" : pct >= 33 ? "Generado" : "Pendiente";
+          const approval = (r.hasApprovalFlow ?? r.has_approval_flow) ? "SI" : "-";
+          const context = { pct, progressLabel, approval };
+
+          return activeTableColumns.map((column) => column.getValue(r, i, context));
+        });
+
+      const safeRows = rows.length ? rows : [columns.map(() => "-")];
+      autoTable(pdf, {
+        head: [columns],
+        body: safeRows,
+        theme: "grid",
+        margin: { left: margin, right: margin, top: headerTop + 12, bottom: margin },
+        styles: {
+          fontSize: 7,
+          cellPadding: 1.2,
+          overflow: "linebreak",
+          valign: "middle",
+        },
+        headStyles: {
+          fontStyle: "bold",
+        },
+        didDrawPage: drawPdfHeader,
+      });
+
+      pdf.save(`Reporte_Planos_${projectName || "Proyecto"}.pdf`);
+      toast.success("PDF generado con exito.", { id: tId });
+    } catch (e) {
+      console.error(e);
+      toast.error("Error al generar PDF.", { id: tId, description: e?.message });
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+
   return (
     <AppLayout>
-      <div className="mx-auto max-w-[1800px] space-y-6 p-6">
+      {/* Contenedor Principal de Reporte 
+        - ref={reportRef}: Para saber qué capturar.
+        - bg-white: Fondo blanco para el PDF.
+        - w-fit / min-w-full: Asegura que si la tabla es ancha, el contenedor crezca y no recorte.
+      */}
+      <div
+        id="pdf-report-root"
+        ref={reportRef}
+        className="mx-auto max-w-[1800px] w-fit min-w-full space-y-6 p-6 bg-white"
+      >
         <div className="flex flex-col justify-between gap-4 border-b border-border pb-6 lg:flex-row lg:items-center">
           <div>
             <div className="flex items-center gap-3">
@@ -501,16 +976,32 @@ export default function AECModelPlansPage() {
                <Button variant={viewMode === "table" ? "default" : "ghost"} size="sm" className={`h-8 gap-2 text-xs ${viewMode === "table" ? "bg-white text-black shadow-sm" : "text-muted-foreground hover:bg-transparent"}`} onClick={() => setViewMode("table")}>
                  <Table2 className="h-3.5 w-3.5" /> Tabla
                </Button>
+               <Button variant={viewMode === "control" ? "default" : "ghost"} size="sm" className={`h-8 gap-2 text-xs ${viewMode === "control" ? "bg-white text-black shadow-sm" : "text-muted-foreground hover:bg-transparent"}`} onClick={() => setViewMode("control")}>
+                 <CalendarDays className="h-3.5 w-3.5" /> Control
+               </Button>
                <Button variant={viewMode === "dashboard" ? "default" : "ghost"} size="sm" className={`h-8 gap-2 text-xs ${viewMode === "dashboard" ? "bg-white text-black shadow-sm" : "text-muted-foreground hover:bg-transparent"}`} onClick={() => setViewMode("dashboard")}>
                  <BarChart3 className="h-3.5 w-3.5" /> Dashboard
                </Button>
              </div>
-          </div>
+             <div className="flex items-center rounded-lg border border-border bg-muted/50 p-1">
+              <Button
+                 variant={viewMode === "alerts" ? "default" : "ghost"}
+                size="sm"
+                className={`h-8 gap-2 text-xs ${viewMode === "alerts" ? "bg-white text-black shadow-sm" : "text-muted-foreground hover:bg-transparent"}`}
+                onClick={() => setViewMode("alerts")}
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+                Alertas
+                <Badge variant="secondary" className="ml-1 h-5 px-1 text-[10px]">{alerts.length}</Badge>
+              </Button>
+             </div>
+           </div>
         </div>
 
         {viewMode === "table" ? (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 p-3">
+            {/* data-html2canvas-ignore hace que esta barra NO salga en el PDF */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 p-3" data-html2canvas-ignore="true">
               <div className="flex items-center gap-2">
                 <TooltipProvider>
                   
@@ -556,8 +1047,20 @@ export default function AECModelPlansPage() {
                   <DropdownMenuContent align="start">
                     <DropdownMenuItem onClick={handleClickImport}><FileUp className="mr-2 h-4 w-4" /> Excel (.xlsx)</DropdownMenuItem>
                   </DropdownMenuContent>
+
                 </DropdownMenu>
                 <Button variant="ghost" size="sm" className="gap-2 hover:bg-background" onClick={handleExportExcel}><FileDown className="h-4 w-4 text-emerald-600" /></Button>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                             <Button variant="ghost" size="sm" className="gap-2 hover:bg-background" onClick={handleExportPDF} disabled={isExportingPdf}>
+                                <FileText className="h-4 w-4 text-red-600" />
+                             </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{isExportingPdf ? "Generando PDF..." : "Exportar PDF (Doble Carta)"}</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+              
               </div>
 
               <div className="ml-auto flex items-center gap-2">
@@ -570,10 +1073,37 @@ export default function AECModelPlansPage() {
 
             {error && <div className="flex items-center gap-2 rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-medium text-red-700"><AlertCircle className="h-4 w-4" /> {error}</div>}
 
-            <SheetsTable data={plans} onEdit={handleEdit} onDeleteRow={handleDeleteRow} />
+            <SheetsTable
+              data={plans}
+              onEdit={handleEdit}
+              onDeleteRow={handleDeleteRow}
+              onVisibleColumnsChange={setVisibleTableColumns}
+            />
           </>
+        ) : viewMode === "control" ? (
+          <div className="bg-white p-4">
+            <div className="mb-4 flex justify-end" data-html2canvas-ignore="true">
+              <Button variant="outline" size="sm" onClick={handleExportPDF} className="gap-2" disabled={isExportingPdf}>
+                <FileText className="h-4 w-4 text-red-600" />
+                {isExportingPdf ? "Generando..." : "Descargar Reporte PDF"}
+              </Button>
+            </div>
+            <ControlTable data={plans} onVisibleColumnsChange={setVisibleControlColumns} />
+          </div>
+        ) : viewMode === "alerts" ? (
+          <div className="bg-white p-4">
+            <AlertsTable data={alerts} />
+          </div>
         ) : (
-          <AnalyticsDashboard data={plans} />
+          <div ref={dashboardExportRef} className="bg-white p-4">
+            <AnalyticsDashboard data={plans} />
+            <div className="mt-4 flex justify-end" data-html2canvas-ignore="true">
+              <Button variant="outline" size="sm" onClick={handleExportPDF} className="gap-2" disabled={isExportingPdf}>
+                <FileText className="h-4 w-4 text-red-600" />
+                {isExportingPdf ? "Generando..." : "Descargar Reporte PDF"}
+              </Button>
+            </div>
+          </div>
         )}
 
         <SelectModelsModal
@@ -583,7 +1113,21 @@ export default function AECModelPlansPage() {
           onClose={() => setModalModelsOpen(false)}
           onSave={async (ids) => {
             const url = `${apiBase}/aec/${pId}/graphql-models/set-selection`;
-            await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modelIds: ids }) });
+          
+            const modelMeta = (models || [])
+              .filter((m) => ids.includes(m.id))
+              .map((m) => ({
+                id: m.id,
+                name: m.name || m.displayName || m.title || m.fileName || "",
+              }));
+          
+            await fetch(url, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ modelIds: ids, modelMeta }),
+            });
+          
             setSelectedModelsIds(ids);
             setModalModelsOpen(false);
           }}
@@ -606,3 +1150,5 @@ export default function AECModelPlansPage() {
     </AppLayout>
   );
 }
+
+
