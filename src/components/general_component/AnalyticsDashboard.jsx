@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import {
   BarChart,
   Bar,
@@ -33,7 +34,33 @@ import {
 } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
+const parseDate = (value) => {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 12, 0, 0, 0);
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    return new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0, 0);
+  }
+  const dmy = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if (dmy) {
+    let [, d, m, y] = dmy;
+    if (y.length === 2) y = `20${y}`;
+    return new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0, 0);
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 12, 0, 0, 0);
+};
+
+const pct = (value, total) => (total > 0 ? (value / total) * 100 : 0);
+
 export default function AnalyticsDashboard({ data = [] }) {
+
   const analytics = useMemo(() => {
     const total = data.length;
 
@@ -162,6 +189,45 @@ export default function AnalyticsDashboard({ data = [] }) {
     }, {});
     const revisionData = Object.entries(revisionCounts).map(([name, value]) => ({ name, value }));
 
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+
+    const plannedToDateCount = data.filter((item) => {
+      const date = parseDate(item.planned_issue_date || item.plannedIssueDate);
+      return date && date.getTime() <= today.getTime();
+    }).length;
+
+    const actualToDateCount = data.filter((item) => {
+      const date = parseDate(item.actual_issue_date || item.actualIssueDate);
+      return date && date.getTime() <= today.getTime();
+    }).length;
+
+    const plannedProgressPct = pct(plannedToDateCount, total);
+    const actualProgressPct = pct(actualToDateCount, total);
+    const progressDeltaPct = actualProgressPct - plannedProgressPct;
+
+    const specialtyMap = data.reduce((acc, item) => {
+      const specialty = String(item.specialty || "").trim() || "Sin especialidad";
+      if (!acc[specialty]) {
+        acc[specialty] = { specialty, total: 0, planned: 0, actual: 0 };
+      }
+      acc[specialty].total += 1;
+
+      const plannedDate = parseDate(item.planned_issue_date || item.plannedIssueDate);
+      const actualDate = parseDate(item.actual_issue_date || item.actualIssueDate);
+      if (plannedDate && plannedDate.getTime() <= today.getTime()) acc[specialty].planned += 1;
+      if (actualDate && actualDate.getTime() <= today.getTime()) acc[specialty].actual += 1;
+      return acc;
+    }, {});
+
+    const specialtyProgress = Object.values(specialtyMap)
+      .map((entry) => ({
+        ...entry,
+        plannedPct: pct(entry.planned, entry.total),
+        actualPct: pct(entry.actual, entry.total),
+      }))
+      .sort((a, b) => a.specialty.localeCompare(b.specialty));
+
     return {
       total,
       completed,
@@ -180,6 +246,12 @@ export default function AnalyticsDashboard({ data = [] }) {
       sCurveData,
       byVersionSet,
       revisionData,
+      plannedToDateCount,
+      actualToDateCount,
+      plannedProgressPct,
+      actualProgressPct,
+      progressDeltaPct,
+      specialtyProgress,
     };
   }, [data]);
 
@@ -199,10 +271,73 @@ export default function AnalyticsDashboard({ data = [] }) {
 
   const deliveryCardIsDelayed = analytics.avgDelay > 0;
   const genCardIsDelayed = analytics.avgGenDelay > 0;
+  const progressIsBehind = analytics.progressDeltaPct < 0;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-pdf-block>
+        <Card className="border-emerald-100 bg-emerald-50/50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-emerald-600/80">% Avance Real</p>
+                <p className="text-2xl font-bold text-emerald-700">{analytics.actualProgressPct.toFixed(2)}%</p>
+              </div>
+              <div className="rounded-lg bg-emerald-100 p-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              </div>
+            </div>
+            <div className="mt-2 text-[10px] font-medium text-emerald-700">
+              {analytics.actualToDateCount} de {analytics.total} planos entregados
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-blue-100 bg-blue-50/50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-blue-600/80">% Avance Programado</p>
+                <p className="text-2xl font-bold text-blue-700">{analytics.plannedProgressPct.toFixed(2)}%</p>
+              </div>
+              <div className="rounded-lg bg-blue-100 p-2">
+                <Calendar className="h-5 w-5 text-blue-600" />
+              </div>
+            </div>
+            <div className="mt-2 text-[10px] font-medium text-blue-700">
+              {analytics.plannedToDateCount} de {analytics.total} planos programados
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className={progressIsBehind ? "border-red-100 bg-red-50/50" : "border-green-100 bg-green-50/50"}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className={`text-xs font-medium ${progressIsBehind ? "text-red-600/80" : "text-green-600/80"}`}>
+                  Indicador (Real - Programado)
+                </p>
+                <p className={`text-2xl font-bold ${progressIsBehind ? "text-red-700" : "text-green-700"}`}>
+                  {analytics.progressDeltaPct > 0 ? "+" : ""}
+                  {analytics.progressDeltaPct.toFixed(2)}%
+                </p>
+              </div>
+              <div className={cn("rounded-lg p-2", progressIsBehind ? "bg-red-100" : "bg-green-100")}>
+                {progressIsBehind ? (
+                  <TrendingDown className="h-5 w-5 text-red-600" />
+                ) : (
+                  <TrendingUp className="h-5 w-5 text-green-600" />
+                )}
+              </div>
+            </div>
+            <div className={`mt-2 text-[10px] font-medium ${progressIsBehind ? "text-red-700" : "text-green-700"}`}>
+              {progressIsBehind ? "Retraso vs programa" : "Adelanto vs programa"}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6" data-pdf-block>
         <Card className="border-emerald-100 bg-emerald-50/50">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -303,7 +438,47 @@ export default function AnalyticsDashboard({ data = [] }) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <Card data-pdf-block>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Layers className="h-4 w-4 text-primary" /> Avance Por Especialidad
+          </CardTitle>
+          <CardDescription>% real, % programado y visibilidad por disciplina</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-collapse text-xs">
+              <thead>
+                <tr className="bg-muted/30">
+                  <th className="border border-border px-3 py-2 text-left">No.</th>
+                  <th className="border border-border px-3 py-2 text-left">Especialidad</th>
+                  <th className="border border-border px-3 py-2 text-right">% Real</th>
+                  <th className="border border-border px-3 py-2 text-right">% Programado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.specialtyProgress.map((row, index) => (
+                  <tr key={row.specialty}>
+                    <td className="border border-border px-3 py-2">{index + 1}</td>
+                    <td className="border border-border px-3 py-2 font-medium">{row.specialty}</td>
+                    <td className="border border-border px-3 py-2 text-right">{row.actualPct.toFixed(2)}%</td>
+                    <td className="border border-border px-3 py-2 text-right">{row.plannedPct.toFixed(2)}%</td>
+                  </tr>
+                ))}
+                <tr className="bg-muted/30 font-semibold">
+                  <td className="border border-border px-3 py-2" colSpan={2}>
+                    AVANCE GENERAL DEL DISENO
+                  </td>
+                  <td className="border border-border px-3 py-2 text-right">{analytics.actualProgressPct.toFixed(2)}%</td>
+                  <td className="border border-border px-3 py-2 text-right">{analytics.plannedProgressPct.toFixed(2)}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2" data-pdf-block>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -371,7 +546,7 @@ export default function AnalyticsDashboard({ data = [] }) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2" data-pdf-block>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -462,7 +637,7 @@ export default function AnalyticsDashboard({ data = [] }) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2" data-pdf-block>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -528,7 +703,7 @@ export default function AnalyticsDashboard({ data = [] }) {
         </Card>
       </div>
 
-      <Card>
+      <Card data-pdf-block>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <BarChart3 className="h-4 w-4 text-primary" /> Análisis por Conjunto
@@ -552,6 +727,7 @@ export default function AnalyticsDashboard({ data = [] }) {
           </div>
         </CardContent>
       </Card>
+
     </div>
   );
 }

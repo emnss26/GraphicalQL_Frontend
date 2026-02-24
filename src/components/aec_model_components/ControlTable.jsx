@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Tooltip,
   TooltipContent,
@@ -14,7 +15,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Columns3, Eye, EyeOff } from "lucide-react";
+import { Check, Columns3, Eye, EyeOff, X } from "lucide-react";
 
 const INFO_COLUMNS = [
   { key: "number", label: "N. Plano", width: "min-w-[120px] w-[120px]" },
@@ -25,6 +26,10 @@ const INFO_COLUMNS = [
   { key: "actualReviewDate", label: "Rev. Real", width: "min-w-[105px] w-[105px]" },
   { key: "plannedIssueDate", label: "Em. Prog.", width: "min-w-[105px] w-[105px]" },
   { key: "actualIssueDate", label: "Em. Real", width: "min-w-[105px] w-[105px]" },
+  { key: "generated", label: "Generado", width: "min-w-[85px] w-[85px]" },
+  { key: "reviewed", label: "Revisado", width: "min-w-[85px] w-[85px]" },
+  { key: "issued", label: "Emitido", width: "min-w-[85px] w-[85px]" },
+  { key: "comment", label: "Comentarios", width: "min-w-[220px] w-[220px]" },
 ];
 
 const DATE_FIELDS = [
@@ -35,6 +40,12 @@ const DATE_FIELDS = [
   "plannedIssueDate",
   "actualIssueDate",
 ];
+
+const READONLY_REAL_DATE_FIELDS = new Set([
+  "actualGenDate",
+  "actualReviewDate",
+  "actualIssueDate",
+]);
 
 const MONTHS_ES = [
   "Enero",
@@ -96,6 +107,15 @@ const formatDate = (value) => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
+const toISODate = (value) => {
+  const date = parseDate(value);
+  if (!date) return "";
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 const addDays = (date, days) => {
   const out = new Date(date);
   out.setDate(out.getDate() + days);
@@ -130,15 +150,17 @@ const pick = (obj, ...keys) => {
 };
 
 const normalizeRow = (plan, index) => ({
+  originalIndex: index,
   rowKey: String(plan?.id ?? plan?.plan_id ?? `temp-${index}`),
   number: pick(plan, "number", "sheet_number"),
   name: pick(plan, "name", "sheet_name"),
-  plannedGenDate: pick(plan, "plannedGenDate", "planned_gen_date"),
-  actualGenDate: pick(plan, "actualGenDate", "actual_gen_date"),
-  plannedReviewDate: pick(plan, "plannedReviewDate", "planned_review_date"),
-  actualReviewDate: pick(plan, "actualReviewDate", "actual_review_date"),
-  plannedIssueDate: pick(plan, "plannedIssueDate", "planned_issue_date"),
-  actualIssueDate: pick(plan, "actualIssueDate", "actual_issue_date"),
+  plannedGenDate: toISODate(pick(plan, "plannedGenDate", "planned_gen_date")),
+  actualGenDate: toISODate(pick(plan, "actualGenDate", "actual_gen_date")),
+  plannedReviewDate: toISODate(pick(plan, "plannedReviewDate", "planned_review_date")),
+  actualReviewDate: toISODate(pick(plan, "actualReviewDate", "actual_review_date")),
+  plannedIssueDate: toISODate(pick(plan, "plannedIssueDate", "planned_issue_date")),
+  actualIssueDate: toISODate(pick(plan, "actualIssueDate", "actual_issue_date")),
+  comment: pick(plan, "comment", "comments", "controlComment"),
 });
 
 function WeekHeaderCell({ week, isCurrentWeek }) {
@@ -292,12 +314,17 @@ function ColumnVisibilitySelector({
   );
 }
 
-export default function ControlTable({ data = [], onVisibleColumnsChange = () => { } }) {
+export default function ControlTable({
+  data = [],
+  onEdit = () => { },
+  onCommentChange = () => { },
+  onVisibleColumnsChange = () => { },
+}) {
   const scrollRef = useRef(null);
+  const [rows, setRows] = useState([]);
 
-  const rows = useMemo(() => {
-    if (!Array.isArray(data)) return [];
-    return data.map(normalizeRow);
+  useEffect(() => {
+    setRows(Array.isArray(data) ? data.map((row, index) => normalizeRow(row, index)) : []);
   }, [data]);
   const [visibleColumns, setVisibleColumns] = useState(
     () => new Set(INFO_COLUMNS.map((column) => column.key))
@@ -441,83 +468,93 @@ export default function ControlTable({ data = [], onVisibleColumnsChange = () =>
     return `${formatDate(weeks[0].startDate)} - ${formatDate(weeks[weeks.length - 1].endDate)}`;
   }, [weeks]);
 
-  const renderInfoCell = (row, columnKey) => {
-    switch (columnKey) {
-      case "number":
-        return (
-          <td
-            key={`${row.rowKey}-${columnKey}`}
-            className="min-w-[120px] whitespace-nowrap border-r border-border px-2 font-mono font-medium text-foreground"
-          >
-            {row.number || "-"}
-          </td>
-        );
-      case "name":
-        return (
-          <td
-            key={`${row.rowKey}-${columnKey}`}
-            className="max-w-[220px] truncate border-r border-border px-2 text-foreground"
-          >
-            <span title={row.name || ""}>{row.name || "-"}</span>
-          </td>
-        );
-      case "plannedGenDate":
-        return (
-          <td
-            key={`${row.rowKey}-${columnKey}`}
-            className="whitespace-nowrap border-r border-border px-2 text-muted-foreground"
-          >
-            {formatDate(row.plannedGenDate)}
-          </td>
-        );
-      case "actualGenDate":
-        return (
-          <td
-            key={`${row.rowKey}-${columnKey}`}
-            className="whitespace-nowrap border-r border-border px-2 text-muted-foreground"
-          >
-            {formatDate(row.actualGenDate)}
-          </td>
-        );
-      case "plannedReviewDate":
-        return (
-          <td
-            key={`${row.rowKey}-${columnKey}`}
-            className="whitespace-nowrap border-r border-border px-2 text-muted-foreground"
-          >
-            {formatDate(row.plannedReviewDate)}
-          </td>
-        );
-      case "actualReviewDate":
-        return (
-          <td
-            key={`${row.rowKey}-${columnKey}`}
-            className="whitespace-nowrap border-r border-border px-2 text-muted-foreground"
-          >
-            {formatDate(row.actualReviewDate)}
-          </td>
-        );
-      case "plannedIssueDate":
-        return (
-          <td
-            key={`${row.rowKey}-${columnKey}`}
-            className="whitespace-nowrap border-r border-border px-2 font-medium text-blue-700"
-          >
-            {formatDate(row.plannedIssueDate)}
-          </td>
-        );
-      case "actualIssueDate":
-        return (
-          <td
-            key={`${row.rowKey}-${columnKey}`}
-            className="whitespace-nowrap border-r border-border px-2 font-medium text-emerald-700"
-          >
-            {formatDate(row.actualIssueDate)}
-          </td>
-        );
-      default:
-        return null;
+  const handleCellChange = useCallback((rowKey, field, value) => {
+    setRows((prev) =>
+      prev.map((row) => (row.rowKey === rowKey ? { ...row, [field]: value } : row))
+    );
+  }, []);
+
+  const handleCellBlur = useCallback((row, field, explicitValue) => {
+    if (row.originalIndex === undefined || row.originalIndex === null) return;
+    if (field === "comment") {
+      onCommentChange(row, explicitValue ?? row.comment ?? "");
+      return;
     }
+    if (field === "generated" || field === "reviewed" || field === "issued") return;
+    const value = explicitValue ?? row[field];
+    if (DATE_FIELDS.includes(field)) {
+      onEdit(row.originalIndex, field, value || null);
+      return;
+    }
+    onEdit(row.originalIndex, field, value);
+  }, [onCommentChange, onEdit]);
+
+  const renderInfoCell = (row, columnKey) => {
+    const isDateColumn = DATE_FIELDS.includes(columnKey);
+    const isReadonlyRealDate = READONLY_REAL_DATE_FIELDS.has(columnKey);
+    const isPlannedIssue = columnKey === "plannedIssueDate";
+    const isActualIssue = columnKey === "actualIssueDate";
+    const isStatusColumn = columnKey === "generated" || columnKey === "reviewed" || columnKey === "issued";
+    const statusValue =
+      columnKey === "generated" ? !!row.actualGenDate : columnKey === "reviewed" ? !!row.actualReviewDate : !!row.actualIssueDate;
+
+    return (
+      <td
+        key={`${row.rowKey}-${columnKey}`}
+        className={cn(
+          "border-r border-border px-1",
+          columnKey === "name" && "max-w-[220px]",
+          columnKey === "number" && "min-w-[120px]",
+          isStatusColumn && "text-center",
+          isPlannedIssue && "text-blue-700",
+          isActualIssue && "text-emerald-700"
+        )}
+      >
+        {isStatusColumn ? (
+          <span className="inline-flex h-6 w-full items-center justify-center">
+            {statusValue ? (
+              <Check className="h-4 w-4 text-emerald-600" />
+            ) : (
+              <X className="h-4 w-4 text-muted-foreground" />
+            )}
+          </span>
+        ) : isDateColumn ? (
+          isReadonlyRealDate ? (
+            <span
+              className={cn(
+                "inline-flex h-7 w-full items-center px-1 text-xs",
+                isActualIssue && "font-medium"
+              )}
+            >
+              {formatDate(row[columnKey])}
+            </span>
+          ) : (
+          <Input
+            type="date"
+            value={toISODate(row[columnKey])}
+            onChange={(event) => handleCellChange(row.rowKey, columnKey, event.target.value)}
+            onBlur={(event) => handleCellBlur(row, columnKey, event.target.value)}
+            className={cn(
+              "h-7 border-transparent bg-transparent px-1 text-xs",
+              isPlannedIssue && "font-medium",
+              isActualIssue && "font-medium"
+            )}
+          />
+          )
+        ) : (
+          <Input
+            value={row[columnKey] || ""}
+            onChange={(event) => handleCellChange(row.rowKey, columnKey, event.target.value)}
+            onBlur={(event) => handleCellBlur(row, columnKey, event.target.value)}
+            placeholder={columnKey === "comment" ? "Comentario..." : ""}
+            className={cn(
+              "h-7 border-transparent bg-transparent px-1 text-xs",
+              columnKey === "number" && "font-mono font-medium"
+            )}
+          />
+        )}
+      </td>
+    );
   };
 
   return (

@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 /* --- CONFIGURACIÓN DE COLUMNAS --- */
 const COLUMN_DEFINITIONS = [
   { id: "index", label: "#", group: "basic", width: "w-12" },
+  { id: "specialty", label: "Especialidad", group: "basic", sortable: true, width: "min-w-[170px]" },
   { id: "number", label: "N° Plano", group: "basic", sortable: true, width: "min-w-[100px]" },
   { id: "name", label: "Nombre", group: "basic", sortable: true, width: "min-w-[140px]" },
   { id: "currentRevision", label: "Rev.", group: "basic", tooltip: "Revisión actual del plano", sortable: true, width: "w-20" },
@@ -85,6 +86,21 @@ const toInputDateValue = (dmy) => {
 };
 
 const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
+
+const SPECIALTY_OPTIONS = [
+  "Arquitectura",
+  "Estructura",
+  "Instalacion Electrica",
+  "Instalacion Hidraulica",
+  "Instalacion Sanitaria",
+  "Instalacion Pluvial",
+  "Instalacion de Gas",
+  "Proteccion contra incendios",
+  "Sistemas especiales",
+  "HVAC",
+];
+
+const normalizeSpecialty = (value) => String(value || "").trim() || "Sin especialidad";
 
 /* --- SUB-COMPONENTES --- */
 
@@ -268,15 +284,19 @@ export default function SheetsTable({
   const [searchTerm, setSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState({ field: "", direction: null });
   const [visibleColumns, setVisibleColumns] = useState(new Set(COLUMN_DEFINITIONS.map(c => c.id)));
+  const [specialtyFilter, setSpecialtyFilter] = useState("all");
+  const [groupBySpecialty, setGroupBySpecialty] = useState(false);
 
   const DATE_FIELDS = useMemo(() => [
     "plannedGenDate", "actualGenDate", "plannedReviewDate", "actualReviewDate", "plannedIssueDate", "actualIssueDate",
   ], []);
 
-  const normalizeRow = (sheet) => ({
+  const normalizeRow = (sheet, index) => ({
+    rowKey: String(sheet.id ?? sheet.plan_id ?? `temp-${index}`),
     id: sheet.id ?? sheet.plan_id ?? null,
     name: sheet.name ?? sheet.sheet_name ?? "",
     number: sheet.number ?? sheet.sheet_number ?? "",
+    specialty: sheet.specialty ?? "",
     currentRevision: sheet.currentRevision ?? sheet.current_revision ?? "",
     currentRevisionDate: isoToDMY(sheet.currentRevisionDate ?? sheet.current_revision_date ?? ""),
     plannedGenDate: isoToDMY(sheet.plannedGenDate ?? sheet.planned_gen_date ?? ""),
@@ -296,19 +316,33 @@ export default function SheetsTable({
   });
 
   useEffect(() => {
-    setRows(Array.isArray(data) ? data.map(normalizeRow) : []);
+    setRows(Array.isArray(data) ? data.map((sheet, index) => normalizeRow(sheet, index)) : []);
   }, [data]);
+
+  const specialtyOptions = useMemo(() => {
+    const values = new Set(SPECIALTY_OPTIONS);
+    rows.forEach((row) => values.add(normalizeSpecialty(row.specialty)));
+    return Array.from(values).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  }, [rows]);
 
   const processedRows = useMemo(() => {
     let result = [...rows];
+
     if (searchTerm) {
       const lower = searchTerm.toLowerCase();
-      result = result.filter(r =>
-        r.name.toLowerCase().includes(lower) ||
-        r.number.toLowerCase().includes(lower) ||
-        r.issueVersionSetName.toLowerCase().includes(lower)
+      result = result.filter(
+        (r) =>
+          r.name.toLowerCase().includes(lower) ||
+          r.number.toLowerCase().includes(lower) ||
+          r.issueVersionSetName.toLowerCase().includes(lower) ||
+          normalizeSpecialty(r.specialty).toLowerCase().includes(lower)
       );
     }
+
+    if (specialtyFilter !== "all") {
+      result = result.filter((row) => normalizeSpecialty(row.specialty) === specialtyFilter);
+    }
+
     if (sortConfig.field && sortConfig.direction) {
       result.sort((a, b) => {
         const valA = a[sortConfig.field] || "";
@@ -318,8 +352,38 @@ export default function SheetsTable({
         return 0;
       });
     }
+
+    if (groupBySpecialty) {
+      result.sort((a, b) => {
+        const sa = normalizeSpecialty(a.specialty);
+        const sb = normalizeSpecialty(b.specialty);
+        const specialtyCmp = sa.localeCompare(sb, "es", { sensitivity: "base" });
+        if (specialtyCmp !== 0) return specialtyCmp;
+        return String(a.number || "").localeCompare(String(b.number || ""), "es", { numeric: true, sensitivity: "base" });
+      });
+    }
+
     return result;
-  }, [rows, searchTerm, sortConfig]);
+  }, [groupBySpecialty, rows, searchTerm, sortConfig, specialtyFilter]);
+
+  const tableEntries = useMemo(() => {
+    if (!groupBySpecialty) {
+      return processedRows.map((row) => ({ type: "row", row }));
+    }
+
+    const entries = [];
+    let lastSpecialty = "";
+    processedRows.forEach((row) => {
+      const specialty = normalizeSpecialty(row.specialty);
+      if (specialty !== lastSpecialty) {
+        entries.push({ type: "group", specialty });
+        lastSpecialty = specialty;
+      }
+      entries.push({ type: "row", row });
+    });
+
+    return entries;
+  }, [groupBySpecialty, processedRows]);
 
   const handleSort = (field) => {
     setSortConfig(prev => {
@@ -527,7 +591,7 @@ export default function SheetsTable({
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Buscar por número, nombre o conjunto..."
+            placeholder="Buscar por especialidad, número, nombre o conjunto..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-9 h-9 bg-background"
@@ -543,7 +607,29 @@ export default function SheetsTable({
             </Button>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={specialtyFilter}
+            onChange={(e) => setSpecialtyFilter(e.target.value)}
+            className="h-9 rounded-md border bg-background px-2 text-xs"
+            title="Filtrar por especialidad"
+          >
+            <option value="all">Todas las especialidades</option>
+            {specialtyOptions.map((specialty) => (
+              <option key={specialty} value={specialty}>
+                {specialty}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            variant={groupBySpecialty ? "secondary" : "outline"}
+            size="sm"
+            className="h-9 text-xs"
+            onClick={() => setGroupBySpecialty((prev) => !prev)}
+          >
+            {groupBySpecialty ? "Agrupado por especialidad" : "Agrupar por especialidad"}
+          </Button>
           <ColumnVisibilitySelector
             columns={COLUMN_DEFINITIONS}
             visibleColumns={visibleColumns}
@@ -646,18 +732,46 @@ export default function SheetsTable({
                   </TableCell>
                 </TableRow>
               ) : (
-                processedRows.map((r) => {
+                tableEntries.map((entry, entryIndex) => {
+                  if (entry.type === "group") {
+                    return (
+                      <TableRow key={`group-${entry.specialty}-${entryIndex}`} className="bg-muted/40 hover:bg-muted/40">
+                        <TableCell colSpan={visibleCols.length} className="py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Especialidad: {entry.specialty}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
+
+                  const r = entry.row;
                   const realIndex = getOriginalIndex(r);
                   const progress = getProgress(r);
                   const isComplete = progress === 100;
                   return (
                     <TableRow
-                      key={r.id || `temp-${Math.random()}`}
+                      key={r.rowKey}
                       className={`group hover:bg-muted/50 transition-colors ${isComplete ? "bg-green-50/40 hover:bg-green-50/60" : ""}`}
                     >
                       {isVisible("index") && (
                         <TableCell className="text-center font-mono text-muted-foreground bg-muted/20 border-r">
                           {realIndex + 1}
+                        </TableCell>
+                      )}
+                      {isVisible("specialty") && (
+                        <TableCell className="p-1 border-r">
+                          <select
+                            value={r.specialty}
+                            onChange={(e) => handleChange(r, "specialty", e.target.value)}
+                            onBlur={(e) => handleBlur(r, "specialty", e.target.value)}
+                            className="h-7 w-full rounded-md border border-transparent bg-transparent px-1 text-xs focus:border-primary focus:outline-none"
+                          >
+                            <option value="">Seleccionar...</option>
+                            {SPECIALTY_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
                         </TableCell>
                       )}
                       {isVisible("number") && (
@@ -787,6 +901,7 @@ export default function SheetsTable({
         <div className="flex gap-4">
           <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Generación/Emisión</div>
           <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Revisión</div>
+          <div className="font-semibold text-foreground">Total visibles: {processedRows.length}</div>
         </div>
       </div>
     </div>

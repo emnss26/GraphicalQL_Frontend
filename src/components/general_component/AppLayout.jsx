@@ -28,7 +28,7 @@ export default function AppLayout({ children, noPadding = false }) {
   const [cookies, , removeCookie] = useCookies(["access_token"]);
 
   const [userEmail, setUserEmail] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => location.pathname.startsWith("/plans/"));
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const showSidebar = location.pathname.startsWith("/plans/");

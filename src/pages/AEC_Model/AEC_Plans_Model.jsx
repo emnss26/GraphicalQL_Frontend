@@ -46,6 +46,7 @@ import AnalyticsDashboard from "@/components/general_component/AnalyticsDashboar
 import AbitatLogoLoader from "@/components/general_component/AbitatLogoLoader";
 import SheetsTable from "@/components/aec_model_components/SheetsTable";
 import ControlTable from "@/components/aec_model_components/ControlTable";
+import WeeklyTrackingTable from "@/components/aec_model_components/WeeklyTrackingTable";
 import SelectFolderModal from "@/components/aec_model_components/SelectFolderModal";
 import SelectModelsModal from "@/components/aec_model_components/SelectModelModal";
 
@@ -58,6 +59,7 @@ const emptyPlan = () => ({
   id: null,
   name: "",
   number: "",
+  specialty: "",
   currentRevision: "",
   currentRevisionDate: "",
   plannedGenDate: "",
@@ -116,6 +118,7 @@ const isoToDMY = (iso) => {
 };
 
 const isNombre = (h) => ["nombre de plano", "nombre", "sheet name", "title"].includes(norm(h));
+const isEspecialidad = (h) => ["especialidad", "specialty", "disciplina"].includes(norm(h));
 const isNumero = (h) => ["número de plano", "numero de plano", "número", "numero", "sheet number", "no.", "no"].includes(norm(h));
 const isGenProg = (h) => ["fecha gen. (programada)", "fecha de generación (programada)", "fecha de generacion (programada)", "planned generation date"].includes(norm(h));
 const isRevProg = (h) => ["rev. técnica (programada)", "revisión técnica (programada)", "revision tecnica (programada)", "planned review date"].includes(norm(h));
@@ -123,6 +126,7 @@ const isEmiProg = (h) => ["emisión (programada)", "emision (programada)", "emis
 
 const TABLE_COLUMN_ORDER = [
   "index",
+  "specialty",
   "number",
   "name",
   "currentRevision",
@@ -189,16 +193,40 @@ export default function AECModelPlansPage() {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [visibleTableColumns, setVisibleTableColumns] = useState(() => [...TABLE_COLUMN_ORDER]);
   const [visibleControlColumns, setVisibleControlColumns] = useState(() => [...CONTROL_INFO_COLUMN_ORDER]);
+  const [trackingRestrictionsByWeek, setTrackingRestrictionsByWeek] = useState({});
+  const [controlCommentsByKey, setControlCommentsByKey] = useState({});
 
   const fileInputRef = useRef(null);
   const reportRef = useRef(null); 
   const dashboardExportRef = useRef(null);
+  const trackingExportRef = useRef(null);
 
   const apiBase = (backendUrl || "").replace(/\/$/, "");
   const pId = encodeURIComponent(projectId || "");
   
   const TABLOID_LANDSCAPE_MM = [431.8, 279.4];
   const fmtDMY = (iso) => isoToDMY(iso || "");
+
+  const toControlCommentIdKey = (id) => {
+    if (id === undefined || id === null || String(id).trim() === "") return "";
+    return `id:${String(id).trim()}`;
+  };
+
+  const toControlCommentRefKey = (number, name) => {
+    const numberKey = norm(number || "");
+    const nameKey = norm(name || "");
+    if (!numberKey && !nameKey) return "";
+    return `num:${numberKey}|name:${nameKey}`;
+  };
+
+  const getPlanCommentKeys = (planLike) => {
+    const idKey = toControlCommentIdKey(planLike?.id ?? planLike?.planId ?? planLike?.plan_id);
+    const refKey = toControlCommentRefKey(
+      planLike?.number ?? planLike?.planNumber ?? planLike?.sheet_number,
+      planLike?.name ?? planLike?.planName ?? planLike?.sheet_name
+    );
+    return { idKey, refKey };
+  };
 
 
   const safeJson = async (res, urlForMsg) => {
@@ -223,6 +251,20 @@ export default function AECModelPlansPage() {
     return { total, completed, inReview, pending, completionRate };
   }, [plans]);
 
+  const plansForControl = useMemo(() => {
+    return plans.map((plan) => {
+      const { idKey, refKey } = getPlanCommentKeys(plan);
+      const comment =
+        (idKey && controlCommentsByKey[idKey] !== undefined ? controlCommentsByKey[idKey] : undefined) ??
+        (refKey && controlCommentsByKey[refKey] !== undefined ? controlCommentsByKey[refKey] : undefined) ??
+        plan.comment ??
+        plan.comments ??
+        plan.controlComment ??
+        "";
+      return { ...plan, comment };
+    });
+  }, [plans, controlCommentsByKey]);
+
   const loadAlerts = async () => {
     try {
       const r = await fetch(`${apiBase}/plans/${pId}/alerts`, { credentials: "include" });
@@ -234,10 +276,53 @@ export default function AECModelPlansPage() {
     }
   };
 
+  const loadTrackingRestrictions = async () => {
+    try {
+      const url = `${apiBase}/plans/${pId}/tracking/restrictions`;
+      const r = await fetch(url, { credentials: "include" });
+      const j = await safeJson(r, "tracking/restrictions");
+      if (!r.ok) throw new Error(j?.error || "Error cargando restricciones.");
+      const restrictions = j.data?.restrictions || [];
+      const map = {};
+      restrictions.forEach((item) => {
+        const weekKey = String(item.weekKey || item.week_key || "").trim();
+        if (!weekKey) return;
+        map[weekKey] = String(item.restriction || "");
+      });
+      setTrackingRestrictionsByWeek(map);
+    } catch (e) {
+      console.error("Error cargando restricciones de seguimiento:", e);
+      setTrackingRestrictionsByWeek({});
+    }
+  };
+
+  const loadControlComments = async () => {
+    try {
+      const url = `${apiBase}/plans/${pId}/control/comments`;
+      const r = await fetch(url, { credentials: "include" });
+      const j = await safeJson(r, "control/comments");
+      if (!r.ok) throw new Error(j?.error || "Error cargando comentarios de control.");
+      const comments = j.data?.comments || [];
+      const map = {};
+      comments.forEach((item) => {
+        const text = String(item.comment || "");
+        const { idKey, refKey } = getPlanCommentKeys(item);
+        if (idKey) map[idKey] = text;
+        if (refKey) map[refKey] = text;
+      });
+      setControlCommentsByKey(map);
+    } catch (e) {
+      console.error("Error cargando comentarios de control:", e);
+      setControlCommentsByKey({});
+    }
+  };
+
   // 1. CARGA INICIAL
   useEffect(() => {
     const initData = async () => {
       setIsLoadingInitial(true);
+      setTrackingRestrictionsByWeek({});
+      setControlCommentsByKey({});
       try {
         const [selFolders, selModels] = await Promise.allSettled([
             fetch(`${apiBase}/aec/${pId}/graphql-folders/get-selection`, { credentials: "include" }).then(r => r.json()),
@@ -251,8 +336,12 @@ export default function AECModelPlansPage() {
         const plansJson = await safeJson(plansRes, "plans");
         const loaded = plansJson.data?.plans ?? [];
         setPlans(loaded.length === 0 ? Array.from({ length: 10 }, emptyPlan) : loaded);
-        
-        await loadAlerts();
+
+        await Promise.allSettled([
+          loadAlerts(),
+          loadTrackingRestrictions(),
+          loadControlComments(),
+        ]);
 
       } catch (err) {
         console.error("Error carga inicial:", err);
@@ -264,6 +353,16 @@ export default function AECModelPlansPage() {
 
     if (pId) initData();
   }, [apiBase, pId]);
+
+  useEffect(() => {
+    if (!pId) return;
+    if (viewMode === "tracking") {
+      loadTrackingRestrictions();
+    }
+    if (viewMode === "control") {
+      loadControlComments();
+    }
+  }, [viewMode, pId]);
 
   // 2. HANDLERS
   const handleOpenModelsModal = async () => {
@@ -345,10 +444,11 @@ export default function AECModelPlansPage() {
       if (!rows.length) throw new Error("Archivo vacío.");
       
       const headers = rows[0];
-      let idxNombre = -1, idxNumero = -1, idxGen = -1, idxRev = -1, idxEmi = -1;
+      let idxNombre = -1, idxNumero = -1, idxSpecialty = -1, idxGen = -1, idxRev = -1, idxEmi = -1;
       headers.forEach((h, i) => {
         if (idxNombre === -1 && isNombre(h)) idxNombre = i;
         if (idxNumero === -1 && isNumero(h)) idxNumero = i;
+        if (idxSpecialty === -1 && isEspecialidad(h)) idxSpecialty = i;
         if (idxGen === -1 && isGenProg(h)) idxGen = i;
         if (idxRev === -1 && isRevProg(h)) idxRev = i;
         if (idxEmi === -1 && isEmiProg(h)) idxEmi = i;
@@ -360,6 +460,7 @@ export default function AECModelPlansPage() {
           return { 
               name: String(r[idxNombre] ?? "").trim(), 
               number: String(r[idxNumero] ?? "").trim(),
+              specialty: idxSpecialty >= 0 ? String(r[idxSpecialty] ?? "").trim() : "",
               plannedGenDate: idxGen >= 0 ? toISODate(r[idxGen]) : "",
               plannedReviewDate: idxRev >= 0 ? toISODate(r[idxRev]) : "",
               plannedIssueDate: idxEmi >= 0 ? toISODate(r[idxEmi]) : ""
@@ -382,6 +483,7 @@ export default function AECModelPlansPage() {
       const reloadRes = await fetch(`${apiBase}/plans/${pId}/plans`, { credentials: "include" });
       const reloadJson = await safeJson(reloadRes, "reload");
       setPlans(reloadJson.data?.plans || []);
+      await loadControlComments();
       
       toast.success("Importación completada.", { id: tId });
     } catch (err) {
@@ -403,6 +505,7 @@ export default function AECModelPlansPage() {
       "Rev. técnica (real)": isoToDMY(r.actualReviewDate || r.actual_review_date || ""),
       "Emisión (programada)": isoToDMY(r.plannedIssueDate || r.planned_issue_date || ""),
       "Emisión (real)": isoToDMY(r.actualIssueDate || r.actual_issue_date || ""),
+      Especialidad: r.specialty || "",
       Conjunto: r.issueVersionSetName || r.sheet_version_set || "",
       Estado: r.status || "",
     }));
@@ -437,6 +540,119 @@ export default function AECModelPlansPage() {
     }
   };
 
+  const handleTrackingRestrictionChange = async ({ weekKey, trackingWeek, weekEnd, restriction }) => {
+    const safeWeekKey = String(weekKey || "").trim();
+    if (!safeWeekKey) return;
+    const newRestriction = String(restriction || "");
+    const restrictionToPersist = newRestriction.trim() ? newRestriction : "";
+    const previousRestriction = trackingRestrictionsByWeek[safeWeekKey] || "";
+
+    setTrackingRestrictionsByWeek((prev) => ({
+      ...prev,
+      [safeWeekKey]: restrictionToPersist,
+    }));
+
+    try {
+      const url = `${apiBase}/plans/${pId}/tracking/restrictions/${encodeURIComponent(safeWeekKey)}`;
+      const res = await fetch(url, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trackingWeek: Number.isFinite(Number(trackingWeek)) ? Number(trackingWeek) : null,
+          weekEnd: weekEnd || null,
+          restriction: restrictionToPersist,
+        }),
+      });
+      const json = await safeJson(res, url);
+      if (!res.ok) throw new Error(json?.error || "Error guardando restriccion.");
+
+      setTrackingRestrictionsByWeek((prev) => {
+        const next = { ...prev };
+        if (restrictionToPersist.trim()) next[safeWeekKey] = restrictionToPersist;
+        else delete next[safeWeekKey];
+        return next;
+      });
+    } catch (err) {
+      console.error(err);
+      setTrackingRestrictionsByWeek((prev) => {
+        const next = { ...prev };
+        if (previousRestriction.trim()) next[safeWeekKey] = previousRestriction;
+        else delete next[safeWeekKey];
+        return next;
+      });
+      toast.error("Error guardando restriccion de seguimiento.");
+    }
+  };
+
+  const handleControlCommentChange = async (row, commentValue) => {
+    const rowIndex = Number(row?.originalIndex);
+    const basePlan = Number.isFinite(rowIndex) ? plans[rowIndex] : null;
+    const planId = basePlan?.id ?? null;
+    const planNumber = String(row?.number ?? basePlan?.number ?? basePlan?.sheet_number ?? "").trim();
+    const planName = String(row?.name ?? basePlan?.name ?? basePlan?.sheet_name ?? "").trim();
+    const comment = String(commentValue || "");
+    const commentToPersist = comment.trim() ? comment : "";
+
+    if (!planId && !planNumber && !planName) {
+      toast.warning("No se pudo identificar el plano para guardar comentario.");
+      return;
+    }
+
+    const { idKey, refKey } = getPlanCommentKeys({
+      id: planId,
+      number: planNumber,
+      name: planName,
+    });
+    const previousById = idKey ? controlCommentsByKey[idKey] : undefined;
+    const previousByRef = refKey ? controlCommentsByKey[refKey] : undefined;
+
+    try {
+      const url = `${apiBase}/plans/${pId}/control/comments`;
+      const payload = { comment: commentToPersist };
+      if (planId) payload.planId = planId;
+      if (planNumber) payload.planNumber = planNumber;
+      if (planName) payload.planName = planName;
+
+      const res = await fetch(url, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await safeJson(res, url);
+      if (!res.ok) throw new Error(json?.error || "Error guardando comentario.");
+
+      setControlCommentsByKey((prev) => {
+        const next = { ...prev };
+        if (idKey) {
+          if (commentToPersist.trim()) next[idKey] = commentToPersist;
+          else delete next[idKey];
+        }
+        if (refKey) {
+          if (commentToPersist.trim()) next[refKey] = commentToPersist;
+          else delete next[refKey];
+        }
+        return next;
+      });
+    } catch (err) {
+      console.error(err);
+      setControlCommentsByKey((prev) => {
+        const next = { ...prev };
+        if (idKey) {
+          if (previousById !== undefined) next[idKey] = previousById;
+          else delete next[idKey];
+        }
+        if (refKey) {
+          if (previousByRef !== undefined) next[refKey] = previousByRef;
+          else delete next[refKey];
+        }
+        return next;
+      });
+      toast.error("Error guardando comentario de control.");
+    }
+  };
+
   const handleSaveList = async () => {
     try {
       if (plans.some((p) => p.id)) {
@@ -446,6 +662,7 @@ export default function AECModelPlansPage() {
       const payload = plans.filter((p) => p.name || p.number).map((p) => ({
           name: p.name,
           number: p.number,
+          specialty: p.specialty || "",
           plannedGenDate: p.plannedGenDate || "",
           plannedReviewDate: p.plannedReviewDate || "",
           plannedIssueDate: p.plannedIssueDate || "",
@@ -468,6 +685,7 @@ export default function AECModelPlansPage() {
       const reloadRes = await fetch(`${apiBase}/plans/${pId}/plans`, { credentials: "include" });
       const reloadJson = await safeJson(reloadRes, "reload");
       setPlans(reloadJson.data?.plans || []);
+      await loadControlComments();
 
       toast.success("Lista guardada.", { id: tId });
     } catch (e) {
@@ -501,6 +719,7 @@ export default function AECModelPlansPage() {
       const reloadRes = await fetch(`${apiBase}/plans/${pId}/plans`, { credentials: "include" });
       const reloadJson = await safeJson(reloadRes, "reload");
       setPlans(reloadJson.data?.plans || []);
+      await loadControlComments();
 
       await loadAlerts();
 
@@ -559,21 +778,16 @@ export default function AECModelPlansPage() {
     setIsExportingPdf(true);
 
     try {
-      if (viewMode === "dashboard") {
-        if (!dashboardExportRef.current) {
-          throw new Error("No se pudo capturar el dashboard.");
+      if (viewMode === "dashboard" || viewMode === "tracking") {
+        const captureTarget = viewMode === "dashboard" ? dashboardExportRef.current : trackingExportRef.current;
+        if (!captureTarget) {
+          throw new Error(
+            viewMode === "dashboard"
+              ? "No se pudo capturar el dashboard."
+              : "No se pudo capturar la vista de seguimiento."
+          );
         }
-
-        const canvas = await html2canvas(dashboardExportRef.current, {
-          backgroundColor: "#ffffff",
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          windowWidth: dashboardExportRef.current.scrollWidth,
-          windowHeight: dashboardExportRef.current.scrollHeight,
-        });
-
-        const imgData = canvas.toDataURL("image/png");
+        const logo = await loadLogo();
         const pdf = new jsPDF({
           orientation: "landscape",
           unit: "mm",
@@ -581,19 +795,188 @@ export default function AECModelPlansPage() {
           compress: true,
         });
 
-        const margin = 8;
+        const margin = 10;
+        const headerTop = 11;
+        const headerSpace = 15;
+        const footerSpace = 6;
+        const blockGap = 4;
         const pageW = pdf.internal.pageSize.getWidth();
         const pageH = pdf.internal.pageSize.getHeight();
-        const renderW = pageW - margin * 2;
-        const renderH = (canvas.height * renderW) / canvas.width;
-        const printableH = pageH - margin * 2;
+        const contentX = margin;
+        const contentY = margin + headerSpace;
+        const contentW = pageW - margin * 2;
+        const contentH = pageH - margin * 2 - headerSpace - footerSpace;
+        const title = `Proyecto: ${projectName || "Proyecto"}`;
+        const sub =
+          viewMode === "dashboard"
+            ? `Dashboard - ${new Date().toLocaleString("es-MX")}`
+            : `Seguimiento - ${new Date().toLocaleString("es-MX")}`;
 
-        let rendered = 0;
-        while (rendered < renderH) {
-          if (rendered > 0) pdf.addPage();
-          const y = margin - rendered;
-          pdf.addImage(imgData, "PNG", margin, y, renderW, renderH, undefined, "FAST");
-          rendered += printableH;
+        const drawPageDecoration = (pageNumber, totalPages) => {
+          let x = margin;
+          if (logo) {
+            pdf.addImage(logo, "PNG", margin, 7, 24, 10);
+            x = margin + 28;
+          }
+          pdf.setFontSize(12);
+          pdf.text(title, x, headerTop);
+          pdf.setFontSize(9);
+          pdf.text(sub, x, headerTop + 5);
+          pdf.text(`Pagina ${pageNumber} de ${totalPages}`, pageW - margin, headerTop, { align: "right" });
+          pdf.setDrawColor(220);
+          pdf.line(margin, contentY - 3, pageW - margin, contentY - 3);
+          pdf.line(margin, pageH - margin - footerSpace + 1, pageW - margin, pageH - margin - footerSpace + 1);
+        };
+
+        const waitForNextPaint = () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => setTimeout(resolve, 80));
+          });
+
+        const renderBlockCanvas = async (block) => {
+          await waitForNextPaint();
+          return html2canvas(block, {
+            backgroundColor: "#ffffff",
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            scrollX: 0,
+            scrollY: -window.scrollY,
+            width: Math.max(block.scrollWidth || 0, block.clientWidth || 0),
+            height: Math.max(block.scrollHeight || 0, block.clientHeight || 0),
+            windowWidth: Math.max(document.documentElement.clientWidth, block.scrollWidth || block.clientWidth || 0),
+            windowHeight: Math.max(document.documentElement.clientHeight, block.scrollHeight || block.clientHeight || 0),
+          });
+        };
+
+        if (viewMode === "tracking") {
+          const tableContainer =
+            captureTarget.querySelector('[data-pdf-role="tracking-table"]') ||
+            captureTarget.querySelector("[data-pdf-block]");
+          const chartBlock = captureTarget.querySelector('[data-pdf-role="tracking-chart"]');
+          if (!tableContainer) {
+            throw new Error("No se encontro la tabla de seguimiento para exportar.");
+          }
+
+          const tableElement = tableContainer.querySelector("table") || tableContainer;
+          const tableCanvas = await renderBlockCanvas(tableElement);
+          if (!tableCanvas.width || !tableCanvas.height) {
+            throw new Error("No se pudo renderizar la tabla de seguimiento.");
+          }
+
+          const tableImgData = tableCanvas.toDataURL("image/png");
+          const tableRenderW = contentW;
+          const tableRenderH = (tableCanvas.height * tableRenderW) / tableCanvas.width;
+          let offsetY = 0;
+          while (offsetY < tableRenderH) {
+            if (offsetY > 0) {
+              pdf.addPage();
+            }
+            pdf.addImage(
+              tableImgData,
+              "PNG",
+              contentX,
+              contentY - offsetY,
+              tableRenderW,
+              tableRenderH,
+              undefined,
+              "FAST"
+            );
+            offsetY += contentH;
+          }
+
+          if (chartBlock) {
+            pdf.addPage();
+            const chartCanvas = await renderBlockCanvas(chartBlock);
+            if (chartCanvas.width && chartCanvas.height) {
+              let chartRenderW = contentW;
+              let chartRenderH = (chartCanvas.height * chartRenderW) / chartCanvas.width;
+              if (chartRenderH > contentH) {
+                const shrinkFactor = contentH / chartRenderH;
+                chartRenderW *= shrinkFactor;
+                chartRenderH *= shrinkFactor;
+              }
+              const chartX = contentX + (contentW - chartRenderW) / 2;
+              const chartY = contentY + (contentH - chartRenderH) / 2;
+              pdf.addImage(
+                chartCanvas.toDataURL("image/png"),
+                "PNG",
+                chartX,
+                chartY,
+                chartRenderW,
+                chartRenderH,
+                undefined,
+                "FAST"
+              );
+            }
+          }
+
+          const totalPages = pdf.getNumberOfPages();
+          for (let page = 1; page <= totalPages; page += 1) {
+            pdf.setPage(page);
+            drawPageDecoration(page, totalPages);
+          }
+
+          pdf.save(`Seguimiento_${projectName || "Proyecto"}.pdf`);
+          toast.success("PDF de seguimiento generado.", { id: tId });
+          return;
+        }
+
+        await waitForNextPaint();
+        const explicitBlocks = Array.from(captureTarget.querySelectorAll("[data-pdf-block]"));
+        const fallbackRoot = captureTarget.firstElementChild;
+        const fallbackBlocks = fallbackRoot
+          ? Array.from(fallbackRoot.children).filter(
+              (el) =>
+                !el.hasAttribute("data-html2canvas-ignore") &&
+                el.getBoundingClientRect().width > 0 &&
+                el.getBoundingClientRect().height > 0
+            )
+          : [];
+
+        const exportBlocks = (explicitBlocks.length
+          ? explicitBlocks
+          : fallbackBlocks.length
+            ? fallbackBlocks
+            : [captureTarget]
+        ).filter(
+          (el) =>
+            !el.hasAttribute("data-html2canvas-ignore") &&
+            el.getBoundingClientRect().width > 0 &&
+            el.getBoundingClientRect().height > 0
+        );
+
+        if (exportBlocks.length === 0) {
+          throw new Error("No se encontraron bloques para exportar.");
+        }
+
+        let cursorY = contentY;
+        for (const block of exportBlocks) {
+          const canvas = await renderBlockCanvas(block);
+          if (!canvas.width || !canvas.height) continue;
+
+          let renderW = contentW;
+          let renderH = (canvas.height * renderW) / canvas.width;
+          if (renderH > contentH) {
+            const shrinkFactor = contentH / renderH;
+            renderW *= shrinkFactor;
+            renderH *= shrinkFactor;
+          }
+
+          if (cursorY !== contentY && cursorY + renderH > contentY + contentH) {
+            pdf.addPage();
+            cursorY = contentY;
+          }
+
+          const drawX = contentX + (contentW - renderW) / 2;
+          pdf.addImage(canvas.toDataURL("image/png"), "PNG", drawX, cursorY, renderW, renderH, undefined, "FAST");
+          cursorY += renderH + blockGap;
+        }
+
+        const totalPages = pdf.getNumberOfPages();
+        for (let page = 1; page <= totalPages; page += 1) {
+          pdf.setPage(page);
+          drawPageDecoration(page, totalPages);
         }
 
         pdf.save(`Dashboard_${projectName || "Proyecto"}.pdf`);
@@ -609,8 +992,8 @@ export default function AECModelPlansPage() {
         compress: true,
       });
 
-      const margin = 6;
-      const headerTop = 10;
+      const margin = 10;
+      const headerTop = 11;
       const title = `Proyecto: ${projectName || "Proyecto"}`;
       const sub =
         viewMode === "control"
@@ -620,7 +1003,7 @@ export default function AECModelPlansPage() {
       const drawPdfHeader = () => {
         let x = margin;
         if (logo) {
-          pdf.addImage(logo, "PNG", margin, 6, 24, 10);
+          pdf.addImage(logo, "PNG", margin, 7, 24, 10);
           x = margin + 28;
         }
         pdf.setFontSize(12);
@@ -873,6 +1256,7 @@ export default function AECModelPlansPage() {
 
       const tableExportColumns = [
         { id: "index", label: "#", getValue: (_row, index) => index + 1 },
+        { id: "specialty", label: "Especialidad", getValue: (row) => row.specialty || "" },
         { id: "number", label: "N. Plano", getValue: (row) => row.number || row.sheet_number || "" },
         { id: "name", label: "Nombre", getValue: (row) => row.name || row.sheet_name || "" },
         { id: "currentRevision", label: "Rev.", getValue: (row) => row.currentRevision || row.current_revision || "" },
@@ -898,7 +1282,7 @@ export default function AECModelPlansPage() {
       );
 
       if (activeTableColumns.length === 0) {
-        toast.warning("No hay columnas visibles en Tabla para exportar.", { id: tId });
+        toast.warning("No hay columnas visibles en Revision para exportar.", { id: tId });
         return;
       }
 
@@ -947,6 +1331,13 @@ export default function AECModelPlansPage() {
   };
 
 
+  const getViewModeButtonClass = (isActive) =>
+    `h-8 gap-2 text-xs transition-colors ${
+      isActive
+        ? "bg-zinc-900 text-white shadow-sm hover:bg-zinc-900 hover:text-white"
+        : "text-muted-foreground hover:bg-zinc-900 hover:text-white"
+    }`;
+
   return (
     <AppLayout>
       {/* Contenedor Principal de Reporte 
@@ -964,32 +1355,35 @@ export default function AECModelPlansPage() {
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold tracking-tight text-foreground">Project Sheets</h1>
               <Badge variant="outline" className="gap-1 rounded-full border-primary/20 bg-primary/5 px-2 text-primary">
-                <Sparkles className="h-3 w-3" /> V2.0
+                <Sparkles className="h-3 w-3" /> V3.0
               </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
               {projectName ? `Proyecto: ${projectName}` : "Gestión y seguimiento de planos"}
             </p>
           </div>
-          <div className="flex items-center gap-4">
-             <div className="flex items-center rounded-lg border border-border bg-muted/50 p-1">
-               <Button variant={viewMode === "table" ? "default" : "ghost"} size="sm" className={`h-8 gap-2 text-xs ${viewMode === "table" ? "bg-white text-black shadow-sm" : "text-muted-foreground hover:bg-transparent"}`} onClick={() => setViewMode("table")}>
-                 <Table2 className="h-3.5 w-3.5" /> Tabla
+           <div className="flex items-center gap-4">
+              <div className="flex items-center rounded-lg border border-border bg-muted/50 p-1">
+               <Button variant="ghost" size="sm" className={getViewModeButtonClass(viewMode === "table")} onClick={() => setViewMode("table")}>
+                 <Table2 className="h-3.5 w-3.5" /> Revision
                </Button>
-               <Button variant={viewMode === "control" ? "default" : "ghost"} size="sm" className={`h-8 gap-2 text-xs ${viewMode === "control" ? "bg-white text-black shadow-sm" : "text-muted-foreground hover:bg-transparent"}`} onClick={() => setViewMode("control")}>
+               <Button variant="ghost" size="sm" className={getViewModeButtonClass(viewMode === "control")} onClick={() => setViewMode("control")}>
                  <CalendarDays className="h-3.5 w-3.5" /> Control
                </Button>
-               <Button variant={viewMode === "dashboard" ? "default" : "ghost"} size="sm" className={`h-8 gap-2 text-xs ${viewMode === "dashboard" ? "bg-white text-black shadow-sm" : "text-muted-foreground hover:bg-transparent"}`} onClick={() => setViewMode("dashboard")}>
+               <Button variant="ghost" size="sm" className={getViewModeButtonClass(viewMode === "tracking")} onClick={() => setViewMode("tracking")}>
+                 <Clock className="h-3.5 w-3.5" /> Seguimiento
+               </Button>
+               <Button variant="ghost" size="sm" className={getViewModeButtonClass(viewMode === "dashboard")} onClick={() => setViewMode("dashboard")}>
                  <BarChart3 className="h-3.5 w-3.5" /> Dashboard
                </Button>
-             </div>
-             <div className="flex items-center rounded-lg border border-border bg-muted/50 p-1">
-              <Button
-                 variant={viewMode === "alerts" ? "default" : "ghost"}
-                size="sm"
-                className={`h-8 gap-2 text-xs ${viewMode === "alerts" ? "bg-white text-black shadow-sm" : "text-muted-foreground hover:bg-transparent"}`}
-                onClick={() => setViewMode("alerts")}
-              >
+              </div>
+              <div className="flex items-center rounded-lg border border-border bg-muted/50 p-1">
+               <Button
+                  variant="ghost"
+                 size="sm"
+                className={getViewModeButtonClass(viewMode === "alerts")}
+                 onClick={() => setViewMode("alerts")}
+               >
                 <AlertCircle className="h-3.5 w-3.5" />
                 Alertas
                 <Badge variant="secondary" className="ml-1 h-5 px-1 text-[10px]">{alerts.length}</Badge>
@@ -997,6 +1391,15 @@ export default function AECModelPlansPage() {
              </div>
            </div>
         </div>
+
+        {viewMode === "dashboard" && (
+          <div className="mt-2 flex justify-end" data-html2canvas-ignore="true">
+            <Button variant="outline" size="sm" onClick={handleExportPDF} className="gap-2" disabled={isExportingPdf}>
+              <FileText className="h-4 w-4 text-red-600" />
+              {isExportingPdf ? "Generando..." : "Descargar Reporte PDF"}
+            </Button>
+          </div>
+        )}
 
         {viewMode === "table" ? (
           <>
@@ -1088,7 +1491,27 @@ export default function AECModelPlansPage() {
                 {isExportingPdf ? "Generando..." : "Descargar Reporte PDF"}
               </Button>
             </div>
-            <ControlTable data={plans} onVisibleColumnsChange={setVisibleControlColumns} />
+            <ControlTable
+              data={plansForControl}
+              onEdit={handleEdit}
+              onCommentChange={handleControlCommentChange}
+              onVisibleColumnsChange={setVisibleControlColumns}
+            />
+          </div>
+        ) : viewMode === "tracking" ? (
+          <div ref={trackingExportRef} className="bg-white p-4">
+            <div className="mb-4 flex justify-end" data-html2canvas-ignore="true">
+              <Button variant="outline" size="sm" onClick={handleExportPDF} className="gap-2" disabled={isExportingPdf}>
+                <FileText className="h-4 w-4 text-red-600" />
+                {isExportingPdf ? "Generando..." : "Descargar Reporte PDF"}
+              </Button>
+            </div>
+            <WeeklyTrackingTable
+              data={plans}
+              projectId={projectId || "global"}
+              restrictionsByWeek={trackingRestrictionsByWeek}
+              onRestrictionChange={handleTrackingRestrictionChange}
+            />
           </div>
         ) : viewMode === "alerts" ? (
           <div className="bg-white p-4">
@@ -1097,12 +1520,6 @@ export default function AECModelPlansPage() {
         ) : (
           <div ref={dashboardExportRef} className="bg-white p-4">
             <AnalyticsDashboard data={plans} />
-            <div className="mt-4 flex justify-end" data-html2canvas-ignore="true">
-              <Button variant="outline" size="sm" onClick={handleExportPDF} className="gap-2" disabled={isExportingPdf}>
-                <FileText className="h-4 w-4 text-red-600" />
-                {isExportingPdf ? "Generando..." : "Descargar Reporte PDF"}
-              </Button>
-            </div>
           </div>
         )}
 
