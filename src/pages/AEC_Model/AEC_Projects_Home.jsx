@@ -34,11 +34,11 @@ export default function AECProjectsPage() {
         if (!result.success && result.error) {
           throw new Error(result.error);
         }
-        //console.log('Project Data', result)
+        // console.log("Datos de proyectos", result);
         setProjects(result.data?.aecProjects || []);
         setError("");
-      } catch (err) {
-        console.error(err);
+      } catch {
+        // console.error("Error cargando proyectos.");
         setError("No se pudieron cargar los proyectos. Revisa tu conexión.");
       } finally {
         setLoading(false);

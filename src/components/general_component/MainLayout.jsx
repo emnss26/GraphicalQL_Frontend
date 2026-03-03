@@ -24,7 +24,7 @@ export default function MainLayout({ children }) {
 
         if (!cancelled) setEmail(nextEmail);
       } catch {
-        // ignore
+        // Ignorar error temporal de perfil.
       }
     };
 
@@ -39,7 +39,7 @@ export default function MainLayout({ children }) {
     try {
       await fetch(`${backendUrl}/auth/logout`, { method: "POST", credentials: "include" });
     } catch {
-      // ignore
+      // Ignorar error de logout; se limpiara la sesion local.
     }
     removeCookie("access_token", { path: "/" });
     navigate("/login");

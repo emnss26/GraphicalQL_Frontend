@@ -30,7 +30,7 @@ export default function GeneralLayout({ children, noPadding = false }) {
     try {
       await fetch(`${backendUrl}/auth/logout`, { method: "POST", credentials: "include" });
     } catch {
-      // ignore
+      // Ignorar error de logout; se limpiara la sesion local.
     }
     removeCookie("access_token", { path: "/" });
     navigate("/login");
