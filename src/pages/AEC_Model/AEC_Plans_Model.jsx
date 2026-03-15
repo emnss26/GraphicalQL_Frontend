@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCookies } from "react-cookie";
 import { useParams, useNavigate } from "react-router-dom";
-import { read, utils, writeFile } from "xlsx";
 
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
@@ -111,7 +110,7 @@ const toISODate = (v) => {
 
 const isoToDMY = (iso) => {
   if (!iso) return "";
-  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const m = String(iso).substring(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return "";
   const [, y, mm, dd] = m;
   return `${dd}/${mm}/${y}`;
@@ -436,15 +435,59 @@ export default function AECModelPlansPage() {
     try {
       const file = e.target.files?.[0];
       if (!file) return;
+
+      if (/\.xls$/i.test(file.name) && !/\.xlsx$/i.test(file.name)) {
+        throw new Error("Formato .xls no soportado. Usa .xlsx.");
+      }
+
       tId = toast.loading("Importando Excel...");
+      const [{ Workbook }] = await Promise.all([import("exceljs")]);
+      const workbook = new Workbook();
       const buf = await file.arrayBuffer();
-      const wb = read(buf, { cellDates: true });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = utils.sheet_to_json(ws, { header: 1, raw: false });
+      await workbook.xlsx.load(buf);
+
+      const worksheet = workbook.worksheets?.[0];
+      if (!worksheet) throw new Error("Archivo vacío.");
+
+      const normalizeCell = (value) => {
+        if (value == null) return "";
+        if (value instanceof Date) return value;
+        if (typeof value === "object") {
+          if (value.result != null) return normalizeCell(value.result);
+          if (typeof value.text === "string") return value.text;
+          if (Array.isArray(value.richText)) {
+            return value.richText.map((part) => part?.text || "").join("");
+          }
+          if (typeof value.hyperlink === "string") {
+            return value.text || value.hyperlink;
+          }
+        }
+        return value;
+      };
+
+      const columnCount = Math.max(worksheet.columnCount || 0, 1);
+      const rowCount = Math.max(worksheet.rowCount || 0, 1);
+      const rows = [];
+
+      for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
+        const row = worksheet.getRow(rowIndex);
+        const values = [];
+        for (let colIndex = 1; colIndex <= columnCount; colIndex += 1) {
+          values.push(normalizeCell(row.getCell(colIndex).value));
+        }
+        rows.push(values);
+      }
+
       if (!rows.length) throw new Error("Archivo vacío.");
-      
-      const headers = rows[0];
-      let idxNombre = -1, idxNumero = -1, idxSpecialty = -1, idxGen = -1, idxRev = -1, idxEmi = -1;
+
+      const headers = rows[0].map((h) => String(h ?? "").trim());
+      let idxNombre = -1;
+      let idxNumero = -1;
+      let idxSpecialty = -1;
+      let idxGen = -1;
+      let idxRev = -1;
+      let idxEmi = -1;
+
       headers.forEach((h, i) => {
         if (idxNombre === -1 && isNombre(h)) idxNombre = i;
         if (idxNumero === -1 && isNumero(h)) idxNumero = i;
@@ -454,18 +497,24 @@ export default function AECModelPlansPage() {
         if (idxEmi === -1 && isEmiProg(h)) idxEmi = i;
       });
 
-      if (idxNumero === -1 || idxNombre === -1) throw new Error("Faltan columnas requeridas.");
+      if (idxNumero === -1 || idxNombre === -1) {
+        throw new Error("Faltan columnas requeridas.");
+      }
 
-      const plansPayload = rows.slice(1).map((r) => {
-          return { 
-              name: String(r[idxNombre] ?? "").trim(), 
-              number: String(r[idxNumero] ?? "").trim(),
-              specialty: idxSpecialty >= 0 ? String(r[idxSpecialty] ?? "").trim() : "",
-              plannedGenDate: idxGen >= 0 ? toISODate(r[idxGen]) : "",
-              plannedReviewDate: idxRev >= 0 ? toISODate(r[idxRev]) : "",
-              plannedIssueDate: idxEmi >= 0 ? toISODate(r[idxEmi]) : ""
+      const plansPayload = rows
+        .slice(1)
+        .map((r) => {
+          const valueAt = (idx) => (idx >= 0 ? normalizeCell(r[idx]) : "");
+          return {
+            name: String(valueAt(idxNombre) ?? "").trim(),
+            number: String(valueAt(idxNumero) ?? "").trim(),
+            specialty: String(valueAt(idxSpecialty) ?? "").trim(),
+            plannedGenDate: idxGen >= 0 ? toISODate(valueAt(idxGen)) : "",
+            plannedReviewDate: idxRev >= 0 ? toISODate(valueAt(idxRev)) : "",
+            plannedIssueDate: idxEmi >= 0 ? toISODate(valueAt(idxEmi)) : "",
           };
-      }).filter(p => p.name || p.number);
+        })
+        .filter((p) => p.name || p.number);
 
       if (!plansPayload.length) throw new Error("No hay datos válidos.");
 
@@ -484,7 +533,7 @@ export default function AECModelPlansPage() {
       const reloadJson = await safeJson(reloadRes, "reload");
       setPlans(reloadJson.data?.plans || []);
       await loadControlComments();
-      
+
       toast.success("Importación completada.", { id: tId });
     } catch (err) {
       console.error(err);
@@ -493,29 +542,99 @@ export default function AECModelPlansPage() {
     }
   };
 
-  const handleExportExcel = () => {
-    const exportData = plans.map((r) => ({
-      "Nombre de plano": r.name || "",
-      "Número de plano": r.number || "",
-      "Revisión Actual": r.currentRevision || "",
-      "Fecha Rev. Actual": isoToDMY(r.currentRevisionDate || r.current_revision_date || ""),
-      "Fecha gen. (programada)": isoToDMY(r.plannedGenDate || r.planned_gen_date || ""),
-      "Fecha gen. (real)": isoToDMY(r.actualGenDate || r.actual_gen_date || ""),
-      "Rev. técnica (programada)": isoToDMY(r.plannedReviewDate || r.planned_review_date || ""),
-      "Rev. técnica (real)": isoToDMY(r.actualReviewDate || r.actual_review_date || ""),
-      "Emisión (programada)": isoToDMY(r.plannedIssueDate || r.planned_issue_date || ""),
-      "Emisión (real)": isoToDMY(r.actualIssueDate || r.actual_issue_date || ""),
-      Especialidad: r.specialty || "",
-      Conjunto: r.issueVersionSetName || r.sheet_version_set || "",
-      Estado: r.status || "",
-    }));
-    const ws = utils.json_to_sheet(exportData);
-    const wb = utils.book_new();
-    utils.book_append_sheet(wb, ws, "Planos");
-    writeFile(wb, `Planos_${projectName || "Proyecto"}.xlsx`);
-    toast.success("Excel exportado.");
-  };
+  const handleExportExcel = async () => {
+    try {
+      const getFirst = (obj, keys) => {
+        for (const key of keys) {
+          const value = obj?.[key];
+          if (value !== undefined && value !== null && String(value).trim() !== "") {
+            return value;
+          }
+        }
+        return "";
+      };
 
+      const hasAny = (obj, keys) => {
+        return keys.some((key) => {
+          const value = obj?.[key];
+          return value !== undefined && value !== null && String(value).trim() !== "";
+        });
+      };
+
+      const getProgressStatus = (obj) => {
+        const hasIssue = hasAny(obj, ["actualIssueDate", "actual_issue_date"]);
+        const hasReview = hasAny(obj, ["actualReviewDate", "actual_review_date"]);
+        const hasGen = hasAny(obj, ["actualGenDate", "actual_gen_date"]);
+        if (hasIssue) return "Completado";
+        if (hasReview) return "En revision";
+        if (hasGen) return "Generado";
+        return "Pendiente";
+      };
+
+      const exportData = plans.map((r) => ({
+        "Nombre de plano": getFirst(r, ["name", "sheet_name"]),
+        "Número de plano": getFirst(r, ["number", "sheet_number"]),
+        "Revisión Actual": getFirst(r, ["currentRevision", "current_revision"]),
+        "Fecha Rev. Actual": isoToDMY(getFirst(r, ["currentRevisionDate", "current_revision_date"])),
+        "Fecha gen. (programada)": isoToDMY(getFirst(r, ["plannedGenDate", "planned_gen_date"])),
+        "Fecha gen. (real)": isoToDMY(getFirst(r, ["actualGenDate", "actual_gen_date"])),
+        "Rev. técnica (programada)": isoToDMY(getFirst(r, ["plannedReviewDate", "planned_review_date"])),
+        "Rev. técnica (real)": isoToDMY(getFirst(r, ["actualReviewDate", "actual_review_date"])),
+        "Emisión (programada)": isoToDMY(getFirst(r, ["plannedIssueDate", "planned_issue_date"])),
+        "Emisión (real)": isoToDMY(getFirst(r, ["actualIssueDate", "actual_issue_date"])),
+        Especialidad: getFirst(r, ["specialty"]),
+        Conjunto: getFirst(r, ["issueVersionSetName", "sheet_version_set"]),
+        Estado: getFirst(r, ["status"]) || getProgressStatus(r),
+      }));
+
+      const [{ Workbook }] = await Promise.all([import("exceljs")]);
+      const workbook = new Workbook();
+      const worksheet = workbook.addWorksheet("Planos");
+
+      const columns = [
+        "Nombre de plano",
+        "Número de plano",
+        "Revisión Actual",
+        "Fecha Rev. Actual",
+        "Fecha gen. (programada)",
+        "Fecha gen. (real)",
+        "Rev. técnica (programada)",
+        "Rev. técnica (real)",
+        "Emisión (programada)",
+        "Emisión (real)",
+        "Especialidad",
+        "Conjunto",
+        "Estado",
+      ];
+
+      worksheet.columns = columns.map((header) => ({
+        header,
+        key: header,
+        width: Math.max(16, header.length + 2),
+      }));
+
+      exportData.forEach((row) => worksheet.addRow(row));
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const safeProjectName = String(projectName || "Proyecto").replace(/[^\w.-]+/g, "_");
+      link.href = url;
+      link.download = `Planos_${safeProjectName}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success("Excel exportado.");
+    } catch (err) {
+      console.error(err);
+      toast.error("No fue posible exportar el Excel.");
+    }
+  };
   const handleEdit = async (rowIndex, field, value) => {
     try {
       const planId = plans[rowIndex]?.id;
@@ -655,11 +774,23 @@ export default function AECModelPlansPage() {
 
   const handleSaveList = async () => {
     try {
-      if (plans.some((p) => p.id)) {
-        toast.info("Ya existen filas guardadas.");
+      const draftRows = plans.filter((p) => !p.id);
+      if (!draftRows.length) {
+        toast.info("No hay filas nuevas por enviar.");
         return;
       }
-      const payload = plans.filter((p) => p.name || p.number).map((p) => ({
+
+      const validDraftRows = draftRows.filter(
+        (p) => String(p.name || "").trim() && String(p.number || "").trim()
+      );
+      const skippedRows = draftRows.length - validDraftRows.length;
+
+      if (!validDraftRows.length) {
+        toast.warning("Completa Nombre y Número en las filas nuevas.");
+        return;
+      }
+
+      const payload = validDraftRows.map((p) => ({
           name: p.name,
           number: p.number,
           specialty: p.specialty || "",
@@ -687,6 +818,9 @@ export default function AECModelPlansPage() {
       setPlans(reloadJson.data?.plans || []);
       await loadControlComments();
 
+      if (skippedRows > 0) {
+        toast.warning(`${skippedRows} fila(s) incompletas no se enviaron.`);
+      }
       toast.success("Lista guardada.", { id: tId });
     } catch (e) {
       toast.error(e.message || "Error al guardar.");
@@ -731,8 +865,6 @@ export default function AECModelPlansPage() {
       setIsSyncing(false);
     }
   };
-
-  const hasPersistedRows = Array.isArray(plans) && plans.some((p) => p.id);
 
   if (isLoadingInitial || isSyncing) {
     return (
@@ -1468,10 +1600,10 @@ export default function AECModelPlansPage() {
 
               <div className="ml-auto flex items-center gap-2">
                  <Button variant="secondary" size="sm" onClick={handleAddRow}><Plus className="w-3 h-3"/> Fila</Button>
-                 {!hasPersistedRows && <Button variant="outline" size="sm" onClick={handleSaveList}>Guardar Todo</Button>}
+                 <Button variant="outline" size="sm" onClick={handleSaveList}><CheckCircle2 className="w-3 h-3" /> Enviar a DB</Button>
                  <Button size="sm" className="bg-[rgb(170,32,47)] text-white hover:bg-[rgb(150,28,42)]" onClick={handleSyncMatch} disabled={isSyncing}><Zap className="w-3 h-3"/> Sincronizar</Button>
               </div>
-              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleFileChange} />
             </div>
 
             {error && <div className="flex items-center gap-2 rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-medium text-red-700"><AlertCircle className="h-4 w-4" /> {error}</div>}
@@ -1567,5 +1699,4 @@ export default function AECModelPlansPage() {
     </AppLayout>
   );
 }
-
 

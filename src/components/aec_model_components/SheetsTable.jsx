@@ -89,7 +89,9 @@ const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCas
 
 const SPECIALTY_OPTIONS = [
   "Arquitectura",
+  "Civil",
   "Estructura",
+  "General",
   "Instalacion Electrica",
   "Instalacion Hidraulica",
   "Instalacion Sanitaria",

@@ -5,12 +5,32 @@ const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
 const clientId = import.meta.env.VITE_CLIENT_ID;
 
 export default function LoginPage() {
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    let state = "";
+
+    try {
+      const stateRes = await fetch(`${backendUrl}/auth/oauth-state`, {
+        method: "GET",
+        credentials: "include",
+      });
+
+      const stateJson = await stateRes.json();
+      if (!stateRes.ok || !stateJson?.data?.state) {
+        throw new Error(stateJson?.message || "No se pudo generar OAuth state");
+      }
+
+      state = String(stateJson.data.state);
+    } catch (err) {
+      console.error("OAuth state generation failed:", err);
+      return;
+    }
+
     const params = new URLSearchParams({
       response_type: "code",
       client_id: clientId,
       redirect_uri: `${backendUrl}/auth/three-legged`,
       scope: "account:read data:read data:create data:write",
+      state,
     });
 
     window.location.href = `https://developer.api.autodesk.com/authentication/v2/authorize?${params.toString()}`;
@@ -21,7 +41,7 @@ export default function LoginPage() {
       <div className="grid h-full grid-cols-1 bg-white md:grid-cols-2">
         <div className="flex items-center justify-center p-6">
           <img
-            src="Abitat_img.png"
+            src="/Abitat_img.png"
             alt="Abitat Construction Solutions"
             className="w-auto max-h-[220px] object-contain md:max-h-[280px]"
             style={{ filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.10))" }}
