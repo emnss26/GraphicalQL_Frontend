@@ -1,11 +1,16 @@
 import React from "react";
 import AppLayout from "@/components/general_component/AppLayout";
 
-const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
-const clientId = import.meta.env.VITE_CLIENT_ID;
+const backendUrl = String(import.meta.env.VITE_API_BACKEND_BASE_URL || "").replace(/\/$/, "");
+const clientId = String(import.meta.env.VITE_CLIENT_ID || "").trim();
 
 export default function LoginPage() {
   const handleLogin = async () => {
+    if (!backendUrl || !clientId) {
+      console.error("Missing frontend auth configuration.");
+      return;
+    }
+
     let state = "";
 
     try {

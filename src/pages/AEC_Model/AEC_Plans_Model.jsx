@@ -52,7 +52,7 @@ import SelectModelsModal from "@/components/aec_model_components/SelectModelModa
 
 import autoTable from "jspdf-autotable";
 
-const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
+const backendUrl = String(import.meta.env.VITE_API_BACKEND_BASE_URL || "").replace(/\/$/, "");
 
 const emptyPlan = () => ({
   id: null,
@@ -118,10 +118,10 @@ const isoToDMY = (iso) => {
 
 const isNombre = (h) => ["nombre de plano", "nombre", "sheet name", "title"].includes(norm(h));
 const isEspecialidad = (h) => ["especialidad", "specialty", "disciplina"].includes(norm(h));
-const isNumero = (h) => ["número de plano", "numero de plano", "número", "numero", "sheet number", "no.", "no"].includes(norm(h));
-const isGenProg = (h) => ["fecha gen. (programada)", "fecha de generación (programada)", "fecha de generacion (programada)", "planned generation date"].includes(norm(h));
-const isRevProg = (h) => ["rev. técnica (programada)", "revisión técnica (programada)", "revision tecnica (programada)", "planned review date"].includes(norm(h));
-const isEmiProg = (h) => ["emisión (programada)", "emision (programada)", "emisión a construcción (programada)", "planned issue date"].includes(norm(h));
+const isNumero = (h) => ["nÃºmero de plano", "numero de plano", "nÃºmero", "numero", "sheet number", "no.", "no"].includes(norm(h));
+const isGenProg = (h) => ["fecha gen. (programada)", "fecha de generaciÃ³n (programada)", "fecha de generacion (programada)", "planned generation date"].includes(norm(h));
+const isRevProg = (h) => ["rev. tÃ©cnica (programada)", "revisiÃ³n tÃ©cnica (programada)", "revision tecnica (programada)", "planned review date"].includes(norm(h));
+const isEmiProg = (h) => ["emisiÃ³n (programada)", "emision (programada)", "emisiÃ³n a construcciÃ³n (programada)", "planned issue date"].includes(norm(h));
 
 const TABLE_COLUMN_ORDER = [
   "index",
@@ -239,6 +239,18 @@ export default function AECModelPlansPage() {
     return res.json();
   };
 
+  const getApiErrorMessage = (payload, fallbackMessage) =>
+    payload?.error || payload?.message || fallbackMessage;
+
+  const fetchJsonOrThrow = async (url, fallbackMessage) => {
+    const response = await fetch(url, { credentials: "include" });
+    const json = await safeJson(response, url);
+    if (!response.ok || json?.success === false) {
+      throw new Error(getApiErrorMessage(json, fallbackMessage));
+    }
+    return json;
+  };
+
   const stats = useMemo(() => {
     const total = plans.length;
     const completed = plans.filter((d) => d.actualIssueDate || d.actual_issue_date).length;
@@ -269,9 +281,11 @@ export default function AECModelPlansPage() {
       const r = await fetch(`${apiBase}/plans/${pId}/alerts`, { credentials: "include" });
       const j = await safeJson(r, "alerts");
       setAlerts(j.data?.alerts || []);
+      return true;
     } catch (e) {
       console.error("Error cargando alertas:", e);
       setAlerts([]);
+      return false;
     }
   };
 
@@ -289,9 +303,11 @@ export default function AECModelPlansPage() {
         map[weekKey] = String(item.restriction || "");
       });
       setTrackingRestrictionsByWeek(map);
+      return true;
     } catch (e) {
       console.error("Error cargando restricciones de seguimiento:", e);
       setTrackingRestrictionsByWeek({});
+      return false;
     }
   };
 
@@ -310,10 +326,34 @@ export default function AECModelPlansPage() {
         if (refKey) map[refKey] = text;
       });
       setControlCommentsByKey(map);
+      return true;
     } catch (e) {
       console.error("Error cargando comentarios de control:", e);
       setControlCommentsByKey({});
+      return false;
     }
+  };
+
+  const loadOptionalSections = async ({ showToast = false } = {}) => {
+    const sections = [
+      { label: "alertas", load: loadAlerts },
+      { label: "restricciones de seguimiento", load: loadTrackingRestrictions },
+      { label: "comentarios de control", load: loadControlComments },
+    ];
+
+    const results = await Promise.allSettled(sections.map(({ load }) => load()));
+    const failedSections = results.flatMap((result, index) => {
+      if (result.status === "fulfilled" && result.value !== false) return [];
+      return [sections[index].label];
+    });
+
+    if (showToast && failedSections.length > 0) {
+      toast.warning("Se cargaron los planes, pero faltan datos auxiliares.", {
+        description: failedSections.join(", "),
+      });
+    }
+
+    return failedSections;
   };
 
   // 1. CARGA INICIAL
@@ -322,29 +362,43 @@ export default function AECModelPlansPage() {
       setIsLoadingInitial(true);
       setTrackingRestrictionsByWeek({});
       setControlCommentsByKey({});
+      setError("");
       try {
-        const [selFolders, selModels] = await Promise.allSettled([
-            fetch(`${apiBase}/aec/${pId}/graphql-folders/get-selection`, { credentials: "include" }).then(r => r.json()),
-            fetch(`${apiBase}/aec/${pId}/graphql-models/get-selection`, { credentials: "include" }).then(r => r.json())
+        const [selFolders, selModels] = await Promise.all([
+          fetchJsonOrThrow(
+            `${apiBase}/aec/${pId}/graphql-folders/get-selection`,
+            "No se pudo cargar la carpeta seleccionada."
+          ).catch((selectionError) => {
+            console.warn("No se pudo cargar la carpeta seleccionada:", selectionError);
+            return null;
+          }),
+          fetchJsonOrThrow(
+            `${apiBase}/aec/${pId}/graphql-models/get-selection`,
+            "No se pudo cargar la seleccion de modelos."
+          ).catch((selectionError) => {
+            console.warn("No se pudo cargar la seleccion de modelos:", selectionError);
+            return null;
+          }),
         ]);
 
-        if (selFolders.status === 'fulfilled') setSelectedFolderId(selFolders.value.data?.folderId || null);
-        if (selModels.status === 'fulfilled') setSelectedModelsIds(selModels.value.data?.modelIds || []);
+        setSelectedFolderId(selFolders?.data?.folderId || null);
+        setSelectedModelsIds(selModels?.data?.modelIds || []);
 
-        const plansRes = await fetch(`${apiBase}/plans/${pId}/plans`, { credentials: "include" });
-        const plansJson = await safeJson(plansRes, "plans");
+        const plansJson = await fetchJsonOrThrow(
+          `${apiBase}/plans/${pId}/plans`,
+          "No se pudieron cargar los planes."
+        );
         const loaded = plansJson.data?.plans ?? [];
         setPlans(loaded.length === 0 ? Array.from({ length: 10 }, emptyPlan) : loaded);
 
-        await Promise.allSettled([
-          loadAlerts(),
-          loadTrackingRestrictions(),
-          loadControlComments(),
-        ]);
+        await loadOptionalSections({ showToast: true });
 
       } catch (err) {
         console.error("Error carga inicial:", err);
-        if (plans.length === 0) setPlans(Array.from({ length: 10 }, emptyPlan));
+        setError(err.message || "No se pudieron cargar los planes.");
+        setPlans((prev) =>
+          prev.length === 0 ? Array.from({ length: 10 }, emptyPlan) : prev
+        );
       } finally {
         setIsLoadingInitial(false);
       }
@@ -356,10 +410,18 @@ export default function AECModelPlansPage() {
   useEffect(() => {
     if (!pId) return;
     if (viewMode === "tracking") {
-      loadTrackingRestrictions();
+      loadTrackingRestrictions().then((ok) => {
+        if (!ok) {
+          toast.warning("No se pudieron actualizar las restricciones de seguimiento.");
+        }
+      });
     }
     if (viewMode === "control") {
-      loadControlComments();
+      loadControlComments().then((ok) => {
+        if (!ok) {
+          toast.warning("No se pudieron actualizar los comentarios de control.");
+        }
+      });
     }
   }, [viewMode, pId]);
 
@@ -401,7 +463,7 @@ export default function AECModelPlansPage() {
             setFolderTree(result.data.folderTree || []);
             toast.success("Estructura cargada.", { id: tId });
         } catch (err) {
-            console.error("Error cargando árbol DM:", err);
+            console.error("Error cargando Ã¡rbol DM:", err);
             toast.error("Error al cargar carpetas.", { id: tId });
         } finally {
             setLoadingTree(false);
@@ -413,19 +475,25 @@ export default function AECModelPlansPage() {
   
   const handleDeleteRow = async (rowIndex) => {
     const row = plans[rowIndex];
-    let deleteOk = true;
+    if (!row) return;
+
     if (row?.id) {
       try {
         const url = `${apiBase}/plans/${pId}/plans/${row.id}`;
         const res = await fetch(url, { method: "DELETE", credentials: "include" });
-        if (!res.ok) deleteOk = false;
+        const json = await safeJson(res, url);
+        if (!res.ok || json?.success === false) {
+          throw new Error(getApiErrorMessage(json, "No se pudo eliminar el plano."));
+        }
       } catch (e) {
-        deleteOk = false;
-        console.warn("DELETE falló", e);
+        console.error("DELETE falló:", e);
+        toast.error(e.message || "No se pudo eliminar el plano.");
+        return;
       }
     }
+
     setPlans((prev) => prev.filter((_, i) => i !== rowIndex));
-    if (deleteOk) toast.success("Plano eliminado.");
+    toast.success("Plano eliminado.");
   };
 
   const handleClickImport = () => fileInputRef.current?.click();
@@ -447,7 +515,7 @@ export default function AECModelPlansPage() {
       await workbook.xlsx.load(buf);
 
       const worksheet = workbook.worksheets?.[0];
-      if (!worksheet) throw new Error("Archivo vacío.");
+      if (!worksheet) throw new Error("Archivo vacÃ­o.");
 
       const normalizeCell = (value) => {
         if (value == null) return "";
@@ -478,7 +546,7 @@ export default function AECModelPlansPage() {
         rows.push(values);
       }
 
-      if (!rows.length) throw new Error("Archivo vacío.");
+      if (!rows.length) throw new Error("Archivo vacÃ­o.");
 
       const headers = rows[0].map((h) => String(h ?? "").trim());
       let idxNombre = -1;
@@ -516,7 +584,7 @@ export default function AECModelPlansPage() {
         })
         .filter((p) => p.name || p.number);
 
-      if (!plansPayload.length) throw new Error("No hay datos válidos.");
+      if (!plansPayload.length) throw new Error("No hay datos vÃ¡lidos.");
 
       const url = `${apiBase}/plans/${pId}/plans/import`;
       const res = await fetch(url, {
@@ -534,7 +602,7 @@ export default function AECModelPlansPage() {
       setPlans(reloadJson.data?.plans || []);
       await loadControlComments();
 
-      toast.success("Importación completada.", { id: tId });
+      toast.success("ImportaciÃ³n completada.", { id: tId });
     } catch (err) {
       console.error(err);
       if (tId) toast.error(`Error: ${err.message}`, { id: tId });
@@ -573,15 +641,15 @@ export default function AECModelPlansPage() {
 
       const exportData = plans.map((r) => ({
         "Nombre de plano": getFirst(r, ["name", "sheet_name"]),
-        "Número de plano": getFirst(r, ["number", "sheet_number"]),
-        "Revisión Actual": getFirst(r, ["currentRevision", "current_revision"]),
+        "NÃºmero de plano": getFirst(r, ["number", "sheet_number"]),
+        "RevisiÃ³n Actual": getFirst(r, ["currentRevision", "current_revision"]),
         "Fecha Rev. Actual": isoToDMY(getFirst(r, ["currentRevisionDate", "current_revision_date"])),
         "Fecha gen. (programada)": isoToDMY(getFirst(r, ["plannedGenDate", "planned_gen_date"])),
         "Fecha gen. (real)": isoToDMY(getFirst(r, ["actualGenDate", "actual_gen_date"])),
-        "Rev. técnica (programada)": isoToDMY(getFirst(r, ["plannedReviewDate", "planned_review_date"])),
-        "Rev. técnica (real)": isoToDMY(getFirst(r, ["actualReviewDate", "actual_review_date"])),
-        "Emisión (programada)": isoToDMY(getFirst(r, ["plannedIssueDate", "planned_issue_date"])),
-        "Emisión (real)": isoToDMY(getFirst(r, ["actualIssueDate", "actual_issue_date"])),
+        "Rev. tÃ©cnica (programada)": isoToDMY(getFirst(r, ["plannedReviewDate", "planned_review_date"])),
+        "Rev. tÃ©cnica (real)": isoToDMY(getFirst(r, ["actualReviewDate", "actual_review_date"])),
+        "EmisiÃ³n (programada)": isoToDMY(getFirst(r, ["plannedIssueDate", "planned_issue_date"])),
+        "EmisiÃ³n (real)": isoToDMY(getFirst(r, ["actualIssueDate", "actual_issue_date"])),
         Especialidad: getFirst(r, ["specialty"]),
         Conjunto: getFirst(r, ["issueVersionSetName", "sheet_version_set"]),
         Estado: getFirst(r, ["status"]) || getProgressStatus(r),
@@ -593,15 +661,15 @@ export default function AECModelPlansPage() {
 
       const columns = [
         "Nombre de plano",
-        "Número de plano",
-        "Revisión Actual",
+        "NÃºmero de plano",
+        "RevisiÃ³n Actual",
         "Fecha Rev. Actual",
         "Fecha gen. (programada)",
         "Fecha gen. (real)",
-        "Rev. técnica (programada)",
-        "Rev. técnica (real)",
-        "Emisión (programada)",
-        "Emisión (real)",
+        "Rev. tÃ©cnica (programada)",
+        "Rev. tÃ©cnica (real)",
+        "EmisiÃ³n (programada)",
+        "EmisiÃ³n (real)",
         "Especialidad",
         "Conjunto",
         "Estado",
@@ -786,7 +854,7 @@ export default function AECModelPlansPage() {
       const skippedRows = draftRows.length - validDraftRows.length;
 
       if (!validDraftRows.length) {
-        toast.warning("Completa Nombre y Número en las filas nuevas.");
+        toast.warning("Completa Nombre y NÃºmero en las filas nuevas.");
         return;
       }
 
@@ -811,7 +879,10 @@ export default function AECModelPlansPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plans: payload }),
       });
-      if (!res.ok) throw new Error("Error al guardar.");
+      const saveJson = await safeJson(res, url);
+      if (!res.ok) {
+        throw new Error(getApiErrorMessage(saveJson, "Error al guardar."));
+      }
       
       const reloadRes = await fetch(`${apiBase}/plans/${pId}/plans`, { credentials: "include" });
       const reloadJson = await safeJson(reloadRes, "reload");
@@ -847,8 +918,9 @@ export default function AECModelPlansPage() {
         body: JSON.stringify({}),
       });
       const json = await safeJson(res, url);
-      console.log("Respuesta", json)
-      if (!res.ok) throw new Error(json?.error || "Error en sincronización.");
+      if (!res.ok) {
+        throw new Error(getApiErrorMessage(json, "Error en sincronizacion."));
+      }
       
       const reloadRes = await fetch(`${apiBase}/plans/${pId}/plans`, { credentials: "include" });
       const reloadJson = await safeJson(reloadRes, "reload");
@@ -857,10 +929,10 @@ export default function AECModelPlansPage() {
 
       await loadAlerts();
 
-      toast.success("Sincronización completada.", { id: tId });
+      toast.success("SincronizaciÃ³n completada.", { id: tId });
     } catch (e) {
       console.error(e);
-      toast.error(e.message || "Falló la sincronización.", { id: tId });
+      toast.error(e.message || "FallÃ³ la sincronizaciÃ³n.", { id: tId });
     } finally {
       setIsSyncing(false);
     }
@@ -1473,7 +1545,7 @@ export default function AECModelPlansPage() {
   return (
     <AppLayout>
       {/* Contenedor Principal de Reporte 
-        - ref={reportRef}: Para saber qué capturar.
+        - ref={reportRef}: Para saber quÃ© capturar.
         - bg-white: Fondo blanco para el PDF.
         - w-fit / min-w-full: Asegura que si la tabla es ancha, el contenedor crezca y no recorte.
       */}
@@ -1491,7 +1563,7 @@ export default function AECModelPlansPage() {
               </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {projectName ? `Proyecto: ${projectName}` : "Gestión y seguimiento de planos"}
+              {projectName ? `Proyecto: ${projectName}` : "GestiÃ³n y seguimiento de planos"}
             </p>
           </div>
            <div className="flex items-center gap-4">
@@ -1567,7 +1639,7 @@ export default function AECModelPlansPage() {
                         <span className="hidden sm:inline">Folder</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Seleccionar carpeta de publicación</TooltipContent>
+                    <TooltipContent>Seleccionar carpeta de publicaciÃ³n</TooltipContent>
                   </Tooltip>
                 
                 </TooltipProvider>
@@ -1669,16 +1741,28 @@ export default function AECModelPlansPage() {
                 id: m.id,
                 name: m.name || m.displayName || m.title || m.fileName || "",
               }));
-          
-            await fetch(url, {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ modelIds: ids, modelMeta }),
-            });
-          
-            setSelectedModelsIds(ids);
-            setModalModelsOpen(false);
+
+            try {
+              const res = await fetch(url, {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ modelIds: ids, modelMeta }),
+              });
+              const json = await safeJson(res, url);
+              if (!res.ok || json?.success === false) {
+                throw new Error(
+                  getApiErrorMessage(json, "No se pudo guardar la seleccion de modelos.")
+                );
+              }
+
+              setSelectedModelsIds(ids);
+              setModalModelsOpen(false);
+              toast.success("Seleccion de modelos guardada.");
+            } catch (err) {
+              console.error(err);
+              toast.error(err.message || "No se pudo guardar la seleccion de modelos.");
+            }
           }}
         />
 
@@ -1690,13 +1774,32 @@ export default function AECModelPlansPage() {
           selectedFolderId={selectedFolderId}
           onSave={async (folderId) => {
             const url = `${apiBase}/aec/${pId}/graphql-folders/set-selection`;
-            await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folderId }) });
-            setSelectedFolderId(folderId);
-            setModalFoldersOpen(false);
+            try {
+              const res = await fetch(url, {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ folderId }),
+              });
+              const json = await safeJson(res, url);
+              if (!res.ok || json?.success === false) {
+                throw new Error(
+                  getApiErrorMessage(json, "No se pudo guardar la carpeta seleccionada.")
+                );
+              }
+
+              setSelectedFolderId(folderId);
+              setModalFoldersOpen(false);
+              toast.success("Carpeta guardada.");
+            } catch (err) {
+              console.error(err);
+              toast.error(err.message || "No se pudo guardar la carpeta seleccionada.");
+            }
           }}
         />
       </div>
     </AppLayout>
   );
 }
+
 

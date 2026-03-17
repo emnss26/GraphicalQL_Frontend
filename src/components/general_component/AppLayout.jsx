@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
-const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
+const backendUrl = String(import.meta.env.VITE_API_BACKEND_BASE_URL || "").replace(/\/$/, "");
 
 const NAVIGATION = [
   { id: "home", label: "Inicio", icon: Home, href: "/" },
@@ -35,6 +35,12 @@ export default function AppLayout({ children, noPadding = false }) {
 
   useEffect(() => {
     const loadProfile = async () => {
+      if (!backendUrl) {
+        setUserEmail("");
+        setIsLoggedIn(false);
+        return;
+      }
+
       try {
         const res = await fetch(`${backendUrl}/auth/userprofile`, { credentials: "include" });
         if (!res.ok) throw new Error("No auth");
@@ -51,6 +57,12 @@ export default function AppLayout({ children, noPadding = false }) {
   }, [cookies.access_token]);
 
   const handleLogout = async () => {
+    if (!backendUrl) {
+      removeCookie("access_token", { path: "/" });
+      navigate("/login");
+      return;
+    }
+
     try {
       await fetch(`${backendUrl}/auth/logout`, { method: "POST", credentials: "include" });
     } catch {

@@ -6,7 +6,7 @@ import { FolderOpen } from "lucide-react";
 import AppLayout from "@/components/general_component/AppLayout";
 import AbitatLogoLoader from "@/components/general_component/AbitatLogoLoader";
 
-const backendUrl = import.meta.env.VITE_API_BACKEND_BASE_URL;
+const backendUrl = String(import.meta.env.VITE_API_BACKEND_BASE_URL || "").replace(/\/$/, "");
 
 export default function AECProjectsPage() {
   const [projects, setProjects] = useState([]);
@@ -53,7 +53,7 @@ export default function AECProjectsPage() {
       <div className="grid min-h-[80vh] grid-cols-1 items-center gap-8 p-6 lg:grid-cols-2">
         <div className="flex items-center justify-center animate-in fade-in duration-700 slide-in-from-left-10">
           <img
-            src="Abitat_img.png"
+            src="/Abitat_img.png"
             alt="Abitat Construction Solutions"
             className="max-h-[220px] w-auto object-contain drop-shadow-xl transition-transform duration-500 hover:scale-105"
           />

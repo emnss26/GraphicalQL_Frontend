@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename)
 
 export default defineConfig({
   // Ruta base para despliegue en IIS
-  base: '/',
+  base: '/ControlPlanos/',
   // base: '/ControlPlanos/',
 
   plugins: [react()],

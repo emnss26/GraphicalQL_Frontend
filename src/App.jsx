@@ -15,7 +15,7 @@ function App() {
   return (
     <CookiesProvider>
 
-      <Router basename="/">
+      <Router basename="/ControlPlanos">
       {/* /ControlPlanos */}
         <Routes>
           <Route exact path="/" element={<HomePage />} />
