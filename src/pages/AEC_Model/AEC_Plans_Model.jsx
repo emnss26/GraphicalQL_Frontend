@@ -964,7 +964,7 @@ export default function AECModelPlansPage() {
   };
   
   const loadLogo = async () => {
-    const candidates = ["/Abitat_img.png", "/Abitat_img.jpg", "/Abitat_img.jpeg", "/Abitat_img.webp"];
+    const candidates = ["/ControlPlanos/Abitat_img.png", "/ControlPlanos/Abitat_img.jpg", "/ControlPlanos/Abitat_img.jpeg", "/ControlPlanos/Abitat_img.webp"];
     for (const u of candidates) {
       try { return await fetchAsDataURL(u); } catch (_) {}
     }

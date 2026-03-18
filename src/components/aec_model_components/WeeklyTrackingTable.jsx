@@ -75,6 +75,40 @@ const toISODateLocal = (dateValue) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+const pickValue = (item, ...keys) => {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return "";
+};
+
+const normalizeTrackingRow = (item) => {
+  const row = {
+    name: pickValue(item, "name", "sheet_name"),
+    number: pickValue(item, "number", "sheet_number"),
+    plannedGenDate: parseDate(pickValue(item, "plannedGenDate", "planned_gen_date")),
+    actualGenDate: parseDate(pickValue(item, "actualGenDate", "actual_gen_date")),
+    plannedReviewDate: parseDate(pickValue(item, "plannedReviewDate", "planned_review_date")),
+    actualReviewDate: parseDate(pickValue(item, "actualReviewDate", "actual_review_date")),
+    plannedIssueDate: parseDate(pickValue(item, "plannedIssueDate", "planned_issue_date")),
+    actualIssueDate: parseDate(pickValue(item, "actualIssueDate", "actual_issue_date")),
+  };
+
+  const hasContent = Boolean(
+    row.name ||
+    row.number ||
+    row.plannedGenDate ||
+    row.actualGenDate ||
+    row.plannedReviewDate ||
+    row.actualReviewDate ||
+    row.plannedIssueDate ||
+    row.actualIssueDate
+  );
+
+  return hasContent ? row : null;
+};
+
 export default function WeeklyTrackingTable({
   data = [],
   projectId = "global",
@@ -88,41 +122,63 @@ export default function WeeklyTrackingTable({
   }, [restrictionsByWeek, projectId]);
 
   const weeklyTracking = useMemo(() => {
-    const total = data.length;
-    const issueDates = [];
+    const rows = data.map(normalizeTrackingRow).filter(Boolean);
+    const total = rows.length;
+    if (total === 0) return [];
 
-    data.forEach((item) => {
-      const plannedDate = parseDate(item.planned_issue_date || item.plannedIssueDate);
-      const actualDate = parseDate(item.actual_issue_date || item.actualIssueDate);
-      if (plannedDate) issueDates.push(plannedDate);
-      if (actualDate) issueDates.push(actualDate);
+    const allDates = [];
+    rows.forEach((row) => {
+      [
+        row.plannedGenDate,
+        row.actualGenDate,
+        row.plannedReviewDate,
+        row.actualReviewDate,
+        row.plannedIssueDate,
+        row.actualIssueDate,
+      ].forEach((date) => {
+        if (date) allDates.push(date);
+      });
     });
 
-    if (issueDates.length === 0) return [];
+    let startDate;
+    let endDate;
 
-    const minDate = new Date(Math.min(...issueDates.map((date) => date.getTime())));
-    const maxDate = new Date(Math.max(...issueDates.map((date) => date.getTime())));
+    if (allDates.length === 0) {
+      const today = new Date();
+      startDate = startOfWeekMonday(today);
+      endDate = addDays(startDate, 6);
+    } else {
+      const minDate = new Date(Math.min(...allDates.map((date) => date.getTime())));
+      const maxDate = new Date(Math.max(...allDates.map((date) => date.getTime())));
+      startDate = startOfWeekMonday(minDate);
+      endDate = addDays(startOfWeekMonday(maxDate), 6);
+    }
 
-    let cursor = startOfWeekMonday(minDate);
-    const end = addDays(startOfWeekMonday(maxDate), 6);
+    let cursor = new Date(startDate);
     let weekNumber = 1;
     let plannedAcc = 0;
     let actualAcc = 0;
     const result = [];
 
-    while (cursor.getTime() <= end.getTime()) {
+    while (cursor.getTime() <= endDate.getTime()) {
       const weekStart = new Date(cursor);
       const weekEnd = addDays(weekStart, 6);
       let plannedWeekly = 0;
       let actualWeekly = 0;
 
-      data.forEach((item) => {
-        const plannedDate = parseDate(item.planned_issue_date || item.plannedIssueDate);
-        const actualDate = parseDate(item.actual_issue_date || item.actualIssueDate);
-        if (plannedDate && plannedDate.getTime() >= weekStart.getTime() && plannedDate.getTime() <= weekEnd.getTime()) {
+      rows.forEach((row) => {
+        if (
+          row.plannedIssueDate &&
+          row.plannedIssueDate.getTime() >= weekStart.getTime() &&
+          row.plannedIssueDate.getTime() <= weekEnd.getTime()
+        ) {
           plannedWeekly += 1;
         }
-        if (actualDate && actualDate.getTime() >= weekStart.getTime() && actualDate.getTime() <= weekEnd.getTime()) {
+        if (
+          row.actualIssueDate &&
+          row.actualIssueDate.getTime() >= weekStart.getTime() &&
+          row.actualIssueDate.getTime() <= weekEnd.getTime()
+        ) {
           actualWeekly += 1;
         }
       });
@@ -140,7 +196,9 @@ export default function WeeklyTrackingTable({
         weekEnd,
         plannedWeekly,
         actualWeekly,
+        plannedTotal: plannedAcc,
         deliveredTotal: actualAcc,
+        totalPlans: total,
         plannedPct,
         actualPct,
         indicatorPct: actualPct - plannedPct,
@@ -171,7 +229,7 @@ export default function WeeklyTrackingTable({
           <CalendarDays className="h-4 w-4 text-primary" /> Seguimiento Semanal
         </CardTitle>
         <CardDescription>
-          Semana, programa, avance real, acumulados e indicador de diferencia
+          Semanas del plan, emisiones semanales, acumulados e indicador de diferencia
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -182,7 +240,9 @@ export default function WeeklyTrackingTable({
                 <th className="border border-border px-2 py-2 text-left">Semana</th>
                 <th className="border border-border px-2 py-2 text-right">Planos Programados</th>
                 <th className="border border-border px-2 py-2 text-right">Avance Real (ACC)</th>
+                <th className="border border-border px-2 py-2 text-right">Planos Totales Planeados a Entregar</th>
                 <th className="border border-border px-2 py-2 text-right">Planos Totales Entregados</th>
+                <th className="border border-border px-2 py-2 text-right">Totales</th>
                 <th className="border border-border px-2 py-2 text-right">% Avance Real</th>
                 <th className="border border-border px-2 py-2 text-right">% Programado</th>
                 <th className="border border-border px-2 py-2 text-right">Indicador</th>
@@ -192,8 +252,8 @@ export default function WeeklyTrackingTable({
             <tbody>
               {weeklyTracking.length === 0 && (
                 <tr>
-                  <td className="border border-border px-2 py-3 text-center text-muted-foreground" colSpan={8}>
-                    No hay semanas calculables con fechas de emision programada/real.
+                  <td className="border border-border px-2 py-3 text-center text-muted-foreground" colSpan={10}>
+                    No hay semanas calculables con fechas del plan.
                   </td>
                 </tr>
               )}
@@ -207,7 +267,9 @@ export default function WeeklyTrackingTable({
                   </td>
                   <td className="border border-border px-2 py-2 text-right">{week.plannedWeekly}</td>
                   <td className="border border-border px-2 py-2 text-right">{week.actualWeekly}</td>
+                  <td className="border border-border px-2 py-2 text-right">{week.plannedTotal}</td>
                   <td className="border border-border px-2 py-2 text-right">{week.deliveredTotal}</td>
+                  <td className="border border-border px-2 py-2 text-right">{week.totalPlans}</td>
                   <td className="border border-border px-2 py-2 text-right">{week.actualPct.toFixed(2)}%</td>
                   <td className="border border-border px-2 py-2 text-right">{week.plannedPct.toFixed(2)}%</td>
                   <td
