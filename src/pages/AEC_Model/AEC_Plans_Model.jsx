@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCookies } from "react-cookie";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
@@ -9,6 +9,7 @@ import AlertsTable from "@/components/aec_model_components/AlertsTable";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -81,7 +82,7 @@ const excelSerialToISO = (n) => {
 };
 
 const dmyToISO = (s) => {
-  const m = String(s || "").trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  const m = String(s || "").trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (!m) return "";
   let [, dd, mm, yy] = m;
   const d = parseInt(dd, 10);
@@ -114,6 +115,44 @@ const isoToDMY = (iso) => {
   if (!m) return "";
   const [, y, mm, dd] = m;
   return `${dd}/${mm}/${y}`;
+};
+
+const hasValue = (value) => value !== undefined && value !== null && String(value).trim() !== "";
+const getFirstFilledValue = (obj, keys) => {
+  for (const key of keys) {
+    if (hasValue(obj?.[key])) return obj[key];
+  }
+  return "";
+};
+const isApprovedReviewStatus = (value) => {
+  const status = String(value || "").trim().toUpperCase();
+  return status === "APPROVED" || status === "APROBADO" || status.includes("APPROVED") || status.includes("APROBADO");
+};
+const getPlanProgressInfo = (plan) => {
+  if (hasValue(getFirstFilledValue(plan, ["actualIssueDate", "actual_issue_date"]))) {
+    return { pct: 100, label: "Emitido a construccion" };
+  }
+
+  if (isApprovedReviewStatus(getFirstFilledValue(plan, ["lastReviewStatus", "latest_review_status"]))) {
+    return { pct: 95, label: "Aprobado" };
+  }
+
+  if (hasValue(getFirstFilledValue(plan, ["lastReviewDate", "latest_review_date"]))) {
+    return { pct: 90, label: "Con flujo de revision" };
+  }
+
+  if (hasValue(getFirstFilledValue(plan, [
+    "actualGenDate",
+    "actual_gen_date",
+    "docsVersion",
+    "docs_version_number",
+    "docsVersionDate",
+    "docs_last_modified",
+  ]))) {
+    return { pct: 85, label: "Publicado en Docs" };
+  }
+
+  return { pct: 0, label: "Pendiente" };
 };
 
 const isNombre = (h) => ["nombre de plano", "nombre", "sheet name", "title"].includes(norm(h));
@@ -160,9 +199,8 @@ const CONTROL_INFO_COLUMN_ORDER = [
 
 // --- Componente Principal ---
 export default function AECModelPlansPage() {
-  const [cookies] = useCookies(["access_token"]);
+  useCookies(["access_token"]);
   const { projectId } = useParams();
-  const navigate = useNavigate();
 
   const [alerts, setAlerts] = useState([]);
 
@@ -184,6 +222,7 @@ export default function AECModelPlansPage() {
   const [modalFoldersOpen, setModalFoldersOpen] = useState(false);
   
   const [error, setError] = useState("");
+  const [isReadOnlyAccess, setIsReadOnlyAccess] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
@@ -259,7 +298,9 @@ export default function AECModelPlansPage() {
     ).length;
     const pending = total - completed - inReview;
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
-    return { total, completed, inReview, pending, completionRate };
+    const processProgressSum = plans.reduce((sum, plan) => sum + getPlanProgressInfo(plan).pct, 0);
+    const processProgressPct = total > 0 ? processProgressSum / total : 0;
+    return { total, completed, inReview, pending, completionRate, processProgressPct };
   }, [plans]);
 
   const plansForControl = useMemo(() => {
@@ -274,7 +315,7 @@ export default function AECModelPlansPage() {
         "";
       return { ...plan, comment };
     });
-  }, [plans, controlCommentsByKey]);
+  }, [plans, controlCommentsByKey, getPlanCommentKeys]);
 
   const loadAlerts = async () => {
     try {
@@ -360,9 +401,25 @@ export default function AECModelPlansPage() {
   useEffect(() => {
     const initData = async () => {
       setIsLoadingInitial(true);
+      setIsReadOnlyAccess(true);
       setTrackingRestrictionsByWeek({});
       setControlCommentsByKey({});
       setError("");
+
+      const accessPromise = fetchJsonOrThrow(
+        `${apiBase}/acc/projects/${pId}/current-user-access`,
+        "No se pudo resolver el acceso actual."
+      )
+        .then((accessJson) => {
+          setIsReadOnlyAccess(Boolean(accessJson?.isReadOnlyAccess));
+          return accessJson;
+        })
+        .catch((accessError) => {
+          console.warn("No se pudo resolver acceso actual del usuario:", accessError);
+          setIsReadOnlyAccess(true);
+          return null;
+        });
+
       try {
         const [selFolders, selModels] = await Promise.all([
           fetchJsonOrThrow(
@@ -392,6 +449,7 @@ export default function AECModelPlansPage() {
         setPlans(loaded.length === 0 ? Array.from({ length: 10 }, emptyPlan) : loaded);
 
         await loadOptionalSections({ showToast: true });
+        await accessPromise;
 
       } catch (err) {
         console.error("Error carga inicial:", err);
@@ -425,8 +483,16 @@ export default function AECModelPlansPage() {
     }
   }, [viewMode, pId]);
 
+  useEffect(() => {
+    if (viewMode === "alerts" && isReadOnlyAccess) {
+      setViewMode("table");
+    }
+  }, [isReadOnlyAccess, viewMode]);
+
   // 2. HANDLERS
   const handleOpenModelsModal = async () => {
+    if (isReadOnlyAccess) return;
+
     setModalModelsOpen(true);
     if (models.length === 0) {
         setLoadingModels(true);
@@ -447,6 +513,8 @@ export default function AECModelPlansPage() {
   };
 
   const handleOpenFoldersModal = async () => {
+    if (isReadOnlyAccess) return;
+
     setModalFoldersOpen(true);
     if (folderTree.length === 0) {
         if (!altProjectId) {
@@ -463,7 +531,7 @@ export default function AECModelPlansPage() {
             setFolderTree(result.data.folderTree || []);
             toast.success("Estructura cargada.", { id: tId });
         } catch (err) {
-            console.error("Error cargando Ã¡rbol DM:", err);
+            console.error("Error cargando Arbol DM:", err);
             toast.error("Error al cargar carpetas.", { id: tId });
         } finally {
             setLoadingTree(false);
@@ -471,9 +539,14 @@ export default function AECModelPlansPage() {
     }
   };
 
-  const handleAddRow = () => setPlans((prev) => [...prev, emptyPlan()]);
+  const handleAddRow = () => {
+    if (isReadOnlyAccess) return;
+    setPlans((prev) => [...prev, emptyPlan()]);
+  };
   
   const handleDeleteRow = async (rowIndex) => {
+    if (isReadOnlyAccess) return;
+
     const row = plans[rowIndex];
     if (!row) return;
 
@@ -496,11 +569,16 @@ export default function AECModelPlansPage() {
     toast.success("Plano eliminado.");
   };
 
-  const handleClickImport = () => fileInputRef.current?.click();
+  const handleClickImport = () => {
+    if (isReadOnlyAccess) return;
+    fileInputRef.current?.click();
+  };
 
   const handleFileChange = async (e) => {
     let tId;
     try {
+      if (isReadOnlyAccess) return;
+
       const file = e.target.files?.[0];
       if (!file) return;
 
@@ -515,7 +593,7 @@ export default function AECModelPlansPage() {
       await workbook.xlsx.load(buf);
 
       const worksheet = workbook.worksheets?.[0];
-      if (!worksheet) throw new Error("Archivo vacÃ­o.");
+      if (!worksheet) throw new Error("Archivo vaci­o.");
 
       const normalizeCell = (value) => {
         if (value == null) return "";
@@ -546,7 +624,7 @@ export default function AECModelPlansPage() {
         rows.push(values);
       }
 
-      if (!rows.length) throw new Error("Archivo vacÃ­o.");
+      if (!rows.length) throw new Error("Archivo vaci­o.");
 
       const headers = rows[0].map((h) => String(h ?? "").trim());
       let idxNombre = -1;
@@ -584,7 +662,7 @@ export default function AECModelPlansPage() {
         })
         .filter((p) => p.name || p.number);
 
-      if (!plansPayload.length) throw new Error("No hay datos vÃ¡lidos.");
+      if (!plansPayload.length) throw new Error("No hay datos validos.");
 
       const url = `${apiBase}/plans/${pId}/plans/import`;
       const res = await fetch(url, {
@@ -602,7 +680,7 @@ export default function AECModelPlansPage() {
       setPlans(reloadJson.data?.plans || []);
       await loadControlComments();
 
-      toast.success("ImportaciÃ³n completada.", { id: tId });
+      toast.success("Importación completada.", { id: tId });
     } catch (err) {
       console.error(err);
       if (tId) toast.error(`Error: ${err.message}`, { id: tId });
@@ -622,22 +700,7 @@ export default function AECModelPlansPage() {
         return "";
       };
 
-      const hasAny = (obj, keys) => {
-        return keys.some((key) => {
-          const value = obj?.[key];
-          return value !== undefined && value !== null && String(value).trim() !== "";
-        });
-      };
-
-      const getProgressStatus = (obj) => {
-        const hasIssue = hasAny(obj, ["actualIssueDate", "actual_issue_date"]);
-        const hasReview = hasAny(obj, ["actualReviewDate", "actual_review_date"]);
-        const hasGen = hasAny(obj, ["actualGenDate", "actual_gen_date"]);
-        if (hasIssue) return "Completado";
-        if (hasReview) return "En revision";
-        if (hasGen) return "Generado";
-        return "Pendiente";
-      };
+      const getProgressStatus = (obj) => getPlanProgressInfo(obj).label;
 
       const exportData = plans.map((r) => ({
         "Nombre de plano": getFirst(r, ["name", "sheet_name"]),
@@ -704,6 +767,8 @@ export default function AECModelPlansPage() {
     }
   };
   const handleEdit = async (rowIndex, field, value) => {
+    if (isReadOnlyAccess) return;
+
     try {
       const planId = plans[rowIndex]?.id;
       setPlans((prev) => {
@@ -773,6 +838,8 @@ export default function AECModelPlansPage() {
   };
 
   const handleControlCommentChange = async (row, commentValue) => {
+    if (isReadOnlyAccess) return;
+
     const rowIndex = Number(row?.originalIndex);
     const basePlan = Number.isFinite(rowIndex) ? plans[rowIndex] : null;
     const planId = basePlan?.id ?? null;
@@ -841,6 +908,8 @@ export default function AECModelPlansPage() {
   };
 
   const handleSaveList = async () => {
+    if (isReadOnlyAccess) return;
+
     try {
       const draftRows = plans.filter((p) => !p.id);
       if (!draftRows.length) {
@@ -899,6 +968,8 @@ export default function AECModelPlansPage() {
   };
 
   const handleSyncMatch = async () => {
+    if (isReadOnlyAccess) return;
+
     if (!selectedModelsIds.length || !selectedFolderId || !altProjectId) {
       toast.warning("Configura modelos y folder primero.");
       return;
@@ -964,9 +1035,13 @@ export default function AECModelPlansPage() {
   };
   
   const loadLogo = async () => {
-    const candidates = ["/ControlPlanos/Abitat_img.png", "/ControlPlanos/Abitat_img.jpg", "/ControlPlanos/Abitat_img.jpeg", "/ControlPlanos/Abitat_img.webp"];
+    const candidates = ["/ControlPlanos/Abitat_img.png", "/ControlPlanos/Abitat_img.jpg", "/ControlPlanos/Abitat_img.jpeg", "/ControlPlanos/Abitat_img.webp", "/Abitat_img.png"];
     for (const u of candidates) {
-      try { return await fetchAsDataURL(u); } catch (_) {}
+      try {
+        return await fetchAsDataURL(u);
+      } catch {
+        continue;
+      }
     }
     return null; 
   };
@@ -1233,7 +1308,7 @@ export default function AECModelPlansPage() {
             const dt = new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0, 0);
             return Number.isNaN(dt.getTime()) ? null : dt;
           }
-          const dmy = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+          const dmy = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
           if (dmy) {
             let [, d, m, y] = dmy;
             if (y.length === 2) y = `20${y}`;
@@ -1495,11 +1570,7 @@ export default function AECModelPlansPage() {
       const rows = (plans || [])
         .filter((r) => (r.name || r.sheet_name || "").trim() || (r.number || r.sheet_number || "").trim())
         .map((r, i) => {
-          const hasIssue = !!(r.actualIssueDate || r.actual_issue_date);
-          const hasReview = !!(r.actualReviewDate || r.actual_review_date);
-          const hasGen = !!(r.actualGenDate || r.actual_gen_date);
-          const pct = hasIssue ? 100 : hasReview ? 66 : hasGen ? 33 : 0;
-          const progressLabel = pct >= 100 ? "Completado" : pct >= 66 ? "En revision" : pct >= 33 ? "Generado" : "Pendiente";
+          const { pct, label: progressLabel } = getPlanProgressInfo(r);
           const approval = (r.hasApprovalFlow ?? r.has_approval_flow) ? "SI" : "-";
           const context = { pct, progressLabel, approval };
 
@@ -1581,18 +1652,20 @@ export default function AECModelPlansPage() {
                  <BarChart3 className="h-3.5 w-3.5" /> Dashboard
                </Button>
               </div>
-              <div className="flex items-center rounded-lg border border-border bg-muted/50 p-1">
-               <Button
-                  variant="ghost"
-                 size="sm"
-                className={getViewModeButtonClass(viewMode === "alerts")}
-                 onClick={() => setViewMode("alerts")}
-               >
-                <AlertCircle className="h-3.5 w-3.5" />
-                Alertas
-                <Badge variant="secondary" className="ml-1 h-5 px-1 text-[10px]">{alerts.length}</Badge>
-              </Button>
-             </div>
+              {!isReadOnlyAccess && (
+                <div className="flex items-center rounded-lg border border-border bg-muted/50 p-1">
+                 <Button
+                    variant="ghost"
+                   size="sm"
+                  className={getViewModeButtonClass(viewMode === "alerts")}
+                   onClick={() => setViewMode("alerts")}
+                 >
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  Alertas
+                  <Badge variant="secondary" className="ml-1 h-5 px-1 text-[10px]">{alerts.length}</Badge>
+                </Button>
+               </div>
+              )}
            </div>
         </div>
 
@@ -1619,6 +1692,7 @@ export default function AECModelPlansPage() {
                         size="sm"
                         className="gap-2 bg-background shadow-sm hover:bg-zinc-50"
                         onClick={handleOpenModelsModal}
+                        disabled={isReadOnlyAccess}
                       >
                         <Boxes className="h-4 w-4 text-zinc-500" />
                         <span className="hidden sm:inline">Modelos</span>
@@ -1634,6 +1708,7 @@ export default function AECModelPlansPage() {
                         size="sm"
                         className="gap-2 bg-background shadow-sm hover:bg-zinc-50"
                         onClick={handleOpenFoldersModal}
+                        disabled={isReadOnlyAccess}
                       >
                         <FolderOpen className="h-4 w-4 text-zinc-500" />
                         <span className="hidden sm:inline">Folder</span>
@@ -1647,12 +1722,12 @@ export default function AECModelPlansPage() {
                 <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="gap-2 hover:bg-background">
+                    <Button variant="ghost" size="sm" className="gap-2 hover:bg-background" disabled={isReadOnlyAccess}>
                       <FileUp className="h-4 w-4 text-zinc-500" /> <ChevronDown className="h-3 w-3 text-muted-foreground" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
-                    <DropdownMenuItem onClick={handleClickImport}><FileUp className="mr-2 h-4 w-4" /> Excel (.xlsx)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleClickImport} disabled={isReadOnlyAccess}><FileUp className="mr-2 h-4 w-4" /> Excel (.xlsx)</DropdownMenuItem>
                   </DropdownMenuContent>
 
                 </DropdownMenu>
@@ -1671,17 +1746,39 @@ export default function AECModelPlansPage() {
               </div>
 
               <div className="ml-auto flex items-center gap-2">
-                 <Button variant="secondary" size="sm" onClick={handleAddRow}><Plus className="w-3 h-3"/> Fila</Button>
-                 <Button variant="outline" size="sm" onClick={handleSaveList}><CheckCircle2 className="w-3 h-3" /> Enviar a DB</Button>
-                 <Button size="sm" className="bg-[rgb(170,32,47)] text-white hover:bg-[rgb(150,28,42)]" onClick={handleSyncMatch} disabled={isSyncing}><Zap className="w-3 h-3"/> Sincronizar</Button>
+                 <Button variant="secondary" size="sm" onClick={handleAddRow} disabled={isReadOnlyAccess}><Plus className="w-3 h-3"/> Fila</Button>
+                 <Button variant="outline" size="sm" onClick={handleSaveList} disabled={isReadOnlyAccess}><CheckCircle2 className="w-3 h-3" /> Enviar a DB</Button>
+                 <Button size="sm" className="bg-[rgb(170,32,47)] text-white hover:bg-[rgb(150,28,42)]" onClick={handleSyncMatch} disabled={isSyncing || isReadOnlyAccess}><Zap className="w-3 h-3"/> Sincronizar</Button>
               </div>
               <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleFileChange} />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-html2canvas-ignore="true">
+              <Card className="border-emerald-100 bg-emerald-50/50 md:col-span-1">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium text-emerald-600/80">% Progreso en emision</p>
+                      <p className="text-2xl font-bold text-emerald-700">{stats.processProgressPct.toFixed(2)}%</p>
+                      <p className="mt-2 text-[10px] font-medium text-emerald-700">
+                        {stats.total > 0
+                          ? `Promedio del proceso en ${stats.total} planos`
+                          : "Sin planos para calcular"}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-100 text-[10px] text-emerald-700">
+                      % Progreso
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             {error && <div className="flex items-center gap-2 rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-medium text-red-700"><AlertCircle className="h-4 w-4" /> {error}</div>}
 
             <SheetsTable
               data={plans}
+              isReadOnly={isReadOnlyAccess}
               onEdit={handleEdit}
               onDeleteRow={handleDeleteRow}
               onVisibleColumnsChange={setVisibleTableColumns}
@@ -1697,6 +1794,7 @@ export default function AECModelPlansPage() {
             </div>
             <ControlTable
               data={plansForControl}
+              isReadOnly={isReadOnlyAccess}
               onEdit={handleEdit}
               onCommentChange={handleControlCommentChange}
               onVisibleColumnsChange={setVisibleControlColumns}
@@ -1710,12 +1808,15 @@ export default function AECModelPlansPage() {
                 {isExportingPdf ? "Generando..." : "Descargar Reporte PDF"}
               </Button>
             </div>
+            <AnalyticsDashboard data={plans} summaryOnly />
+            <div className="mt-6">
             <WeeklyTrackingTable
               data={plans}
               projectId={projectId || "global"}
               restrictionsByWeek={trackingRestrictionsByWeek}
               onRestrictionChange={handleTrackingRestrictionChange}
             />
+            </div>
           </div>
         ) : viewMode === "alerts" ? (
           <div className="bg-white p-4">
@@ -1723,7 +1824,7 @@ export default function AECModelPlansPage() {
           </div>
         ) : (
           <div ref={dashboardExportRef} className="bg-white p-4">
-            <AnalyticsDashboard data={plans} />
+            <AnalyticsDashboard data={plans} hideOverview />
           </div>
         )}
 
@@ -1733,6 +1834,8 @@ export default function AECModelPlansPage() {
           loading={loadingModels} 
           onClose={() => setModalModelsOpen(false)}
           onSave={async (ids) => {
+            if (isReadOnlyAccess) return;
+
             const url = `${apiBase}/aec/${pId}/graphql-models/set-selection`;
           
             const modelMeta = (models || [])
@@ -1773,6 +1876,8 @@ export default function AECModelPlansPage() {
           folderTree={folderTree}
           selectedFolderId={selectedFolderId}
           onSave={async (folderId) => {
+            if (isReadOnlyAccess) return;
+
             const url = `${apiBase}/aec/${pId}/graphql-folders/set-selection`;
             try {
               const res = await fetch(url, {

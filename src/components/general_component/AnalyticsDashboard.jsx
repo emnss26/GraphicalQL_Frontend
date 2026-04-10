@@ -59,7 +59,7 @@ const parseDate = (value) => {
 
 const pct = (value, total) => (total > 0 ? (value / total) * 100 : 0);
 
-export default function AnalyticsDashboard({ data = [] }) {
+export default function AnalyticsDashboard({ data = [], summaryOnly = false, hideOverview = false }) {
 
   const analytics = useMemo(() => {
     const total = data.length;
@@ -275,6 +275,8 @@ export default function AnalyticsDashboard({ data = [] }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {!hideOverview && (
+        <>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-pdf-block>
         <Card className="border-emerald-100 bg-emerald-50/50">
           <CardContent className="p-4">
@@ -477,7 +479,11 @@ export default function AnalyticsDashboard({ data = [] }) {
           </div>
         </CardContent>
       </Card>
+        </>
+      )}
 
+      {!summaryOnly && (
+        <>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2" data-pdf-block>
         <Card>
           <CardHeader>
@@ -727,6 +733,8 @@ export default function AnalyticsDashboard({ data = [] }) {
           </div>
         </CardContent>
       </Card>
+        </>
+      )}
 
     </div>
   );

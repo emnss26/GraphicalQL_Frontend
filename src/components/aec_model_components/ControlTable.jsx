@@ -316,6 +316,7 @@ function ColumnVisibilitySelector({
 
 export default function ControlTable({
   data = [],
+  isReadOnly = false,
   onEdit = () => { },
   onCommentChange = () => { },
   onVisibleColumnsChange = () => { },
@@ -469,12 +470,16 @@ export default function ControlTable({
   }, [weeks]);
 
   const handleCellChange = useCallback((rowKey, field, value) => {
+    if (isReadOnly) return;
+
     setRows((prev) =>
       prev.map((row) => (row.rowKey === rowKey ? { ...row, [field]: value } : row))
     );
-  }, []);
+  }, [isReadOnly]);
 
   const handleCellBlur = useCallback((row, field, explicitValue) => {
+    if (isReadOnly) return;
+
     if (row.originalIndex === undefined || row.originalIndex === null) return;
     if (field === "comment") {
       onCommentChange(row, explicitValue ?? row.comment ?? "");
@@ -487,7 +492,7 @@ export default function ControlTable({
       return;
     }
     onEdit(row.originalIndex, field, value);
-  }, [onCommentChange, onEdit]);
+  }, [isReadOnly, onCommentChange, onEdit]);
 
   const renderInfoCell = (row, columnKey) => {
     const isDateColumn = DATE_FIELDS.includes(columnKey);
@@ -531,6 +536,7 @@ export default function ControlTable({
           ) : (
           <Input
             type="date"
+            disabled={isReadOnly}
             value={toISODate(row[columnKey])}
             onChange={(event) => handleCellChange(row.rowKey, columnKey, event.target.value)}
             onBlur={(event) => handleCellBlur(row, columnKey, event.target.value)}
@@ -544,6 +550,7 @@ export default function ControlTable({
         ) : (
           <Input
             value={row[columnKey] || ""}
+            disabled={isReadOnly}
             onChange={(event) => handleCellChange(row.rowKey, columnKey, event.target.value)}
             onBlur={(event) => handleCellBlur(row, columnKey, event.target.value)}
             placeholder={columnKey === "comment" ? "Comentario..." : ""}

@@ -67,7 +67,7 @@ const isoToDMY = (iso) => {
 
 const dmyToISO = (dmy) => {
   if (!dmy) return "";
-  const m = String(dmy).trim().match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})$/);
+  const m = String(dmy).trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (!m) return "";
   let [, dd, mm, yy] = m;
   const d = parseInt(dd, 10);
@@ -103,14 +103,28 @@ const SPECIALTY_OPTIONS = [
 ];
 
 const normalizeSpecialty = (value) => String(value || "").trim() || "Sin especialidad";
+const hasValue = (value) => value !== undefined && value !== null && String(value).trim() !== "";
+const isApprovedReviewStatus = (value) => {
+  const status = String(value || "").trim().toUpperCase();
+  return status === "APPROVED" || status === "APROBADO" || status.includes("APPROVED") || status.includes("APROBADO");
+};
+
+const getProgress = (row) => {
+  if (hasValue(row.actualIssueDate)) return 100;
+  if (isApprovedReviewStatus(row.lastReviewStatus)) return 95;
+  if (hasValue(row.lastReviewDate)) return 90;
+  if (hasValue(row.actualGenDate) || hasValue(row.docsVersion) || hasValue(row.docsVersionDate)) return 85;
+  return 0;
+};
 
 /* --- SUB-COMPONENTES --- */
 
 const ProgressBar = ({ pct }) => {
   let info = { color: "bg-gray-300", label: "Pendiente", textColor: "text-gray-500" };
-  if (pct >= 100) info = { color: "bg-green-600", label: "Completado", textColor: "text-green-700" };
-  else if (pct >= 66) info = { color: "bg-blue-600", label: "En revisión", textColor: "text-blue-700" };
-  else if (pct >= 33) info = { color: "bg-yellow-500", label: "Generado", textColor: "text-yellow-700" };
+  if (pct >= 100) info = { color: "bg-green-600", label: "En sheets", textColor: "text-green-700" };
+  else if (pct >= 95) info = { color: "bg-emerald-600", label: "Aprobado", textColor: "text-emerald-700" };
+  else if (pct >= 90) info = { color: "bg-blue-600", label: "Con flujo", textColor: "text-blue-700" };
+  else if (pct >= 85) info = { color: "bg-amber-500", label: "En Docs", textColor: "text-amber-700" };
 
   return (
     <TooltipProvider>
@@ -161,12 +175,13 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-const DateCell = ({ value, editable, onChange, onBlur }) => {
+const DateCell = ({ value, editable, disabled, onChange, onBlur }) => {
   if (editable) {
     return (
       <div className="relative group w-full">
         <Input
           type="date"
+          disabled={disabled}
           value={toInputDateValue(value)}
           onChange={(e) => onChange?.(e.target.value)}
           onBlur={onBlur}
@@ -278,6 +293,7 @@ const ColumnVisibilitySelector = ({ columns, visibleColumns, onToggle }) => {
 
 export default function SheetsTable({
   data = [],
+  isReadOnly = false,
   onEdit = () => { },
   onDeleteRow = () => { },
   onVisibleColumnsChange = () => { },
@@ -414,6 +430,8 @@ export default function SheetsTable({
   const getOriginalIndex = (rowObject) => rows.indexOf(rowObject);
 
   const handleChange = (rowObject, field, value) => {
+    if (isReadOnly) return;
+
     const idx = getOriginalIndex(rowObject);
     if (idx === -1) return;
     setRows(prev => {
@@ -424,6 +442,8 @@ export default function SheetsTable({
   };
 
   const handleBlur = (rowObject, field, value) => {
+    if (isReadOnly) return;
+
     const idx = getOriginalIndex(rowObject);
     if (idx === -1) return;
     if (DATE_FIELDS.includes(field)) {
@@ -435,6 +455,8 @@ export default function SheetsTable({
   };
 
   const handleDateInput = (rowObject, field, dateValueYYYYMMDD) => {
+    if (isReadOnly) return;
+
     if (!dateValueYYYYMMDD) {
       handleChange(rowObject, field, "");
       return;
@@ -442,13 +464,6 @@ export default function SheetsTable({
     const [y, m, d] = dateValueYYYYMMDD.split("-");
     const newDMY = `${d}/${m}/${y}`;
     handleChange(rowObject, field, newDMY);
-  };
-
-  const getProgress = (r) => {
-    if (r.actualIssueDate) return 100;
-    if (r.actualReviewDate) return 66;
-    if (r.actualGenDate) return 33;
-    return 0;
   };
 
   const isVisible = (id) => visibleColumns.has(id);
@@ -501,7 +516,11 @@ export default function SheetsTable({
   });
 
   const persistWidths = useCallback((next) => {
-    try { localStorage.setItem(RESIZE_STORAGE_KEY, JSON.stringify(next)); } catch { }
+    try {
+      localStorage.setItem(RESIZE_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      return;
+    }
   }, []);
 
   const resizeRef = useRef(null);
@@ -561,7 +580,7 @@ export default function SheetsTable({
       persistWidths(next);
       return next;
     });
-  }, [persistWidths]);
+  }, [getDefaultWidths, persistWidths]);
   // ====== /COLUMN RESIZE ======
 
   // ✅ MOVIDO: visibleCols y runs fuera del thead, para reusar también en <colgroup>
@@ -763,6 +782,7 @@ export default function SheetsTable({
                         <TableCell className="p-1 border-r">
                           <select
                             value={r.specialty}
+                            disabled={isReadOnly}
                             onChange={(e) => handleChange(r, "specialty", e.target.value)}
                             onBlur={(e) => handleBlur(r, "specialty", e.target.value)}
                             className="h-7 w-full rounded-md border border-transparent bg-transparent px-1 text-xs focus:border-primary focus:outline-none"
@@ -780,6 +800,7 @@ export default function SheetsTable({
                         <TableCell className="p-1 border-r">
                           <Input
                             value={r.number}
+                            disabled={isReadOnly}
                             onChange={(e) => handleChange(r, "number", e.target.value)}
                             onBlur={(e) => handleBlur(r, "number", e.target.value)}
                             className="h-7 text-xs border-transparent focus:border-primary bg-transparent font-medium w-full min-w-0"
@@ -790,6 +811,7 @@ export default function SheetsTable({
                         <TableCell className="p-1 border-r">
                           <Input
                             value={r.name}
+                            disabled={isReadOnly}
                             onChange={(e) => handleChange(r, "name", e.target.value)}
                             onBlur={(e) => handleBlur(r, "name", e.target.value)}
                             className="h-7 text-xs border-transparent focus:border-primary bg-transparent w-full min-w-0"
@@ -809,6 +831,7 @@ export default function SheetsTable({
                         <TableCell className="p-1 border-r bg-blue-50/10">
                           <DateCell
                             editable
+                            disabled={isReadOnly}
                             value={r.plannedGenDate}
                             onChange={(v) => handleDateInput(r, "plannedGenDate", v)}
                             onBlur={() => handleBlur(r, "plannedGenDate", r.plannedGenDate)}
@@ -829,6 +852,7 @@ export default function SheetsTable({
                         <TableCell className="p-1 border-r">
                           <DateCell
                             editable
+                            disabled={isReadOnly}
                             value={r.plannedReviewDate}
                             onChange={(v) => handleDateInput(r, "plannedReviewDate", v)}
                             onBlur={() => handleBlur(r, "plannedReviewDate", r.plannedReviewDate)}
@@ -858,6 +882,7 @@ export default function SheetsTable({
                         <TableCell className="p-1 border-r bg-blue-50/10">
                           <DateCell
                             editable
+                            disabled={isReadOnly}
                             value={r.plannedIssueDate}
                             onChange={(v) => handleDateInput(r, "plannedIssueDate", v)}
                             onBlur={() => handleBlur(r, "plannedIssueDate", r.plannedIssueDate)}
@@ -882,6 +907,7 @@ export default function SheetsTable({
                           <Button
                             variant="ghost"
                             size="sm"
+                            disabled={isReadOnly}
                             className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
                             onClick={() => onDeleteRow(realIndex)}
                           >
